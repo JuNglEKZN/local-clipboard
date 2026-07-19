@@ -1,0 +1,35 @@
+services:
+  local-clipboard:
+    build: .
+    container_name: local-clipboard
+    restart: unless-stopped
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${APP_PORT:-8080}:${APP_PORT:-8080}"
+    environment:
+      APP_HOST: ${APP_HOST:-0.0.0.0}
+      APP_PORT: ${APP_PORT:-8080}
+      APP_PASSWORD: ${APP_PASSWORD:-change-me}
+      API_TOKEN: ${API_TOKEN:-change-me}
+      SESSION_SECRET: ${SESSION_SECRET:-change-me}
+      SESSION_SECURE: ${SESSION_SECURE:-false}
+      SESSION_TTL_SECONDS: ${SESSION_TTL_SECONDS:-604800}
+      MAX_ENTRY_BYTES: ${MAX_ENTRY_BYTES:-512000}
+      MAX_HISTORY_ITEMS: ${MAX_HISTORY_ITEMS:-50}
+      RETENTION_DAYS: ${RETENTION_DAYS:-30}
+      MAX_DATABASE_BYTES: ${MAX_DATABASE_BYTES:-104857600}
+      DATABASE_PATH: ${DATABASE_PATH:-/data/clipboard.db}
+      TIMEZONE: ${TIMEZONE:-Europe/Amsterdam}
+      DEV_MODE: ${DEV_MODE:-false}
+      LOGIN_RATE_LIMIT: ${LOGIN_RATE_LIMIT:-8}
+      LOGIN_RATE_WINDOW_SECONDS: ${LOGIN_RATE_WINDOW_SECONDS:-300}
+    volumes:
+      - clipboard-data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/api/health', timeout=3).read()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+volumes:
+  clipboard-data:

@@ -1,0 +1,62 @@
+<!doctype html>
+<html lang="ru">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="csrf-token" content="{{ csrf_token }}">
+  <title>Local Clipboard</title>
+  <link rel="stylesheet" href="/static/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <div>
+      <h1>Local Clipboard</h1>
+      <p id="lastSaved">Последнее сохранение: нет данных</p>
+    </div>
+    <div class="top-actions">
+      <span id="connection" class="status disconnected">Нет соединения</span>
+      <button id="themeToggle" class="icon-button" type="button" title="Переключить тему">Тема</button>
+      <form method="post" action="/logout">
+        <button class="ghost" type="submit">Выйти</button>
+      </form>
+    </div>
+  </header>
+
+  <main class="shell">
+    <section class="editor-panel">
+      <div class="toolbar">
+        <button id="pasteBtn" type="button">Вставить</button>
+        <button id="copyBtn" type="button">Копировать</button>
+        <button id="saveBtn" type="button" class="primary">Сохранить</button>
+        <button id="clearBtn" type="button">Очистить</button>
+        <button id="editorBtn" type="button" class="segmented active">Редактор</button>
+        <button id="previewBtn" type="button" class="segmented">Просмотр</button>
+      </div>
+
+      <textarea id="clipboardText" spellcheck="false" placeholder="Вставьте текст, Markdown, код или ссылку"></textarea>
+      <article id="preview" class="markdown hidden"></article>
+
+      <div class="meta-row">
+        <span id="charCount">0 символов</span>
+        <span id="byteCount">0 КБ</span>
+      </div>
+    </section>
+
+    <section class="history-panel">
+      <div class="section-heading">
+        <h2>История</h2>
+        <button id="clearHistoryBtn" type="button" class="danger ghost">Очистить историю</button>
+      </div>
+      <div id="historyList" class="history-list"></div>
+    </section>
+  </main>
+
+  <div id="toastHost" class="toast-host"></div>
+  <div id="conflictToast" class="conflict-toast hidden">
+    <span>На сервере появился новый текст. Открыть его?</span>
+    <button id="openIncomingBtn" type="button">Открыть</button>
+    <button id="keepCurrentBtn" type="button">Оставить текущий</button>
+  </div>
+  <script src="/static/app.js"></script>
+</body>
+</html>
