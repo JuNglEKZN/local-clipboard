@@ -220,9 +220,7 @@
 
   async function saveText() {
     const body = JSON.stringify({ text: textArea.value, source: "web" });
-    const entry = currentEntry
-      ? await request(`/api/clipboard/${currentEntry.id}`, { method: "PUT", body })
-      : await request("/api/clipboard", { method: "POST", body });
+    const entry = await request("/api/clipboard", { method: "POST", body });
     setEntry(entry, false);
     await loadHistory();
     toast("Текст сохранён");
