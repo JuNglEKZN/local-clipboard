@@ -18,6 +18,9 @@ class Settings(BaseSettings):
     retention_days: int = Field(30, alias="RETENTION_DAYS")
     max_database_bytes: int = Field(104857600, alias="MAX_DATABASE_BYTES")
     database_path: str = Field("/data/clipboard.db", alias="DATABASE_PATH")
+    file_storage_path: str = Field("/data/files", alias="FILE_STORAGE_PATH")
+    max_file_bytes: int = Field(104857600, alias="MAX_FILE_BYTES")
+    max_file_storage_bytes: int = Field(2147483648, alias="MAX_FILE_STORAGE_BYTES")
     timezone: str = Field("Europe/Amsterdam", alias="TIMEZONE")
     dev_mode: bool = Field(False, alias="DEV_MODE")
     login_rate_limit: int = Field(8, alias="LOGIN_RATE_LIMIT")
@@ -25,7 +28,15 @@ class Settings(BaseSettings):
 
     model_config = SettingsConfigDict(env_file=".env", extra="ignore", populate_by_name=True)
 
-    @field_validator("max_entry_bytes", "max_history_items", "retention_days", "max_database_bytes", "session_ttl_seconds")
+    @field_validator(
+        "max_entry_bytes",
+        "max_history_items",
+        "retention_days",
+        "max_database_bytes",
+        "max_file_bytes",
+        "max_file_storage_bytes",
+        "session_ttl_seconds",
+    )
     @classmethod
     def must_be_positive(cls, value: int) -> int:
         if value <= 0:

@@ -19,6 +19,16 @@
   const keepCurrentBtn = document.getElementById("keepCurrentBtn");
   const themeToggle = document.getElementById("themeToggle");
   const csrfToken = document.querySelector("meta[name='csrf-token']").content;
+  const clipboardTab = document.getElementById("clipboardTab");
+  const filesTab = document.getElementById("filesTab");
+  const clipboardView = document.getElementById("clipboardView");
+  const filesView = document.getElementById("filesView");
+  const chooseFilesBtn = document.getElementById("chooseFilesBtn");
+  const fileInput = document.getElementById("fileInput");
+  const dropZone = document.getElementById("dropZone");
+  const uploadQueue = document.getElementById("uploadQueue");
+  const fileList = document.getElementById("fileList");
+  const storageUsage = document.getElementById("storageUsage");
 
   let currentEntry = null;
   let savedText = "";
@@ -56,7 +66,10 @@
   }
 
   function formatBytes(bytes) {
-    return `${(bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)} КБ`;
+    if (bytes < 1024) return `${bytes} Б`;
+    if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(bytes >= 10240 ? 0 : 1)} КБ`;
+    if (bytes < 1024 * 1024 * 1024) return `${(bytes / 1024 / 1024).toFixed(1)} МБ`;
+    return `${(bytes / 1024 / 1024 / 1024).toFixed(1)} ГБ`;
   }
 
   function formatDate(value) {
@@ -65,6 +78,14 @@
       dateStyle: "short",
       timeStyle: "medium"
     }).format(new Date(value));
+  }
+
+  function fileWord(count) {
+    const mod10 = count % 10;
+    const mod100 = count % 100;
+    if (mod10 === 1 && mod100 !== 11) return "файл";
+    if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return "файла";
+    return "файлов";
   }
 
   function updateMeta() {
@@ -218,6 +239,100 @@
     });
   }
 
+  function switchSection(section) {
+    const showFiles = section === "files";
+    clipboardView.classList.toggle("hidden", showFiles);
+    filesView.classList.toggle("hidden", !showFiles);
+    clipboardTab.classList.toggle("active", !showFiles);
+    filesTab.classList.toggle("active", showFiles);
+    localStorage.setItem("section", section);
+    if (showFiles) loadFiles().catch((error) => toast(error.message));
+  }
+
+  async function loadFiles() {
+    const data = await request("/api/files");
+    fileList.innerHTML = "";
+    storageUsage.textContent = `${data.items.length} ${fileWord(data.items.length)}, занято ${formatBytes(data.total_bytes)}`;
+    if (!data.items.length) {
+      fileList.innerHTML = "<p class=\"muted\">Файлов пока нет.</p>";
+      return;
+    }
+    data.items.forEach((entry) => {
+      const item = document.createElement("div");
+      item.className = "file-item";
+      item.innerHTML = `
+        <div class="file-info">
+          <span class="file-name"></span>
+          <span class="file-meta">${formatBytes(entry.size_bytes)} · ${formatDate(entry.created_at)}</span>
+        </div>
+        <div class="file-actions">
+          <a class="download-link" href="/api/files/${entry.id}/download">Скачать</a>
+          <button type="button" class="danger ghost" data-delete-file="${entry.id}">Удалить</button>
+        </div>`;
+      item.querySelector(".file-name").textContent = entry.original_name;
+      fileList.appendChild(item);
+    });
+  }
+
+  function uploadFile(file) {
+    return new Promise((resolve, reject) => {
+      const item = document.createElement("div");
+      item.className = "upload-item";
+      const label = document.createElement("span");
+      label.className = "file-name";
+      label.textContent = file.name;
+      const progress = document.createElement("progress");
+      progress.max = 100;
+      progress.value = 0;
+      item.append(label, progress);
+      uploadQueue.classList.remove("hidden");
+      uploadQueue.appendChild(item);
+
+      const form = new FormData();
+      form.append("upload", file, file.name);
+      form.append("source", "web");
+      const xhr = new XMLHttpRequest();
+      xhr.open("POST", "/api/files");
+      xhr.setRequestHeader("X-CSRF-Token", csrfToken);
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable) progress.value = Math.round((event.loaded / event.total) * 100);
+      };
+      xhr.onload = () => {
+        item.remove();
+        if (!uploadQueue.children.length) uploadQueue.classList.add("hidden");
+        if (xhr.status >= 200 && xhr.status < 300) resolve();
+        else {
+          let message = "Не удалось загрузить файл";
+          try { message = JSON.parse(xhr.responseText).detail || message; } catch (_error) { /* response is not JSON */ }
+          reject(new Error(message));
+        }
+      };
+      xhr.onerror = () => {
+        item.remove();
+        if (!uploadQueue.children.length) uploadQueue.classList.add("hidden");
+        reject(new Error("Соединение прервано во время загрузки"));
+      };
+      xhr.send(form);
+    });
+  }
+
+  async function uploadFiles(files) {
+    const selected = Array.from(files || []);
+    if (!selected.length) return;
+    let uploaded = 0;
+    for (const file of selected) {
+      try {
+        await uploadFile(file);
+        uploaded += 1;
+      } catch (error) {
+        toast(`${file.name}: ${error.message}`);
+      }
+    }
+    fileInput.value = "";
+    await loadFiles();
+    if (uploaded) toast(uploaded === 1 ? "Файл загружен" : `Загружено файлов: ${uploaded}`);
+  }
+
   async function saveText() {
     const body = JSON.stringify({ text: textArea.value, source: "web" });
     const entry = await request("/api/clipboard", { method: "POST", body });
@@ -291,6 +406,9 @@
       if (data.event === "history_changed") {
         await loadHistory();
       }
+      if (data.event === "files_changed" && !filesView.classList.contains("hidden")) {
+        await loadFiles();
+      }
     };
   }
 
@@ -350,6 +468,38 @@
     }
   });
 
+  clipboardTab.addEventListener("click", () => switchSection("clipboard"));
+  filesTab.addEventListener("click", () => switchSection("files"));
+  chooseFilesBtn.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("click", () => fileInput.click());
+  dropZone.addEventListener("keydown", (event) => {
+    if (event.key === "Enter" || event.key === " ") {
+      event.preventDefault();
+      fileInput.click();
+    }
+  });
+  fileInput.addEventListener("change", () => uploadFiles(fileInput.files));
+  ["dragenter", "dragover"].forEach((name) => dropZone.addEventListener(name, (event) => {
+    event.preventDefault();
+    dropZone.classList.add("dragging");
+  }));
+  ["dragleave", "drop"].forEach((name) => dropZone.addEventListener(name, (event) => {
+    event.preventDefault();
+    dropZone.classList.remove("dragging");
+  }));
+  dropZone.addEventListener("drop", (event) => uploadFiles(event.dataTransfer.files));
+  fileList.addEventListener("click", async (event) => {
+    const button = event.target.closest("button[data-delete-file]");
+    if (!button || !confirm("Удалить этот файл?")) return;
+    try {
+      await request(`/api/files/${button.dataset.deleteFile}`, { method: "DELETE" });
+      await loadFiles();
+      toast("Файл удалён");
+    } catch (error) {
+      toast(error.message);
+    }
+  });
+
   themeToggle.addEventListener("click", () => {
     const current = document.documentElement.dataset.theme || "auto";
     const next = current === "dark" ? "light" : "dark";
@@ -358,6 +508,7 @@
   });
   const storedTheme = localStorage.getItem("theme");
   if (storedTheme) document.documentElement.dataset.theme = storedTheme;
+  switchSection(localStorage.getItem("section") === "files" ? "files" : "clipboard");
 
   loadInitial().catch((error) => toast(error.message));
   connectWebSocket();

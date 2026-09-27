@@ -23,6 +23,12 @@
   </header>
 
   <main class="shell">
+    <nav class="app-tabs" aria-label="Разделы">
+      <button id="clipboardTab" class="app-tab active" type="button">Текст</button>
+      <button id="filesTab" class="app-tab" type="button">Файлы</button>
+    </nav>
+
+    <div id="clipboardView" class="app-view">
     <section class="editor-panel">
       <div class="toolbar">
         <button id="pasteBtn" type="button">Вставить</button>
@@ -49,6 +55,28 @@
       </div>
       <div id="historyList" class="history-list"></div>
     </section>
+    </div>
+
+    <div id="filesView" class="app-view hidden">
+      <section class="files-panel">
+        <div class="section-heading files-heading">
+          <div>
+            <h2>Файлы</h2>
+            <p id="storageUsage" class="muted">Загрузка списка...</p>
+          </div>
+          <button id="chooseFilesBtn" type="button" class="primary">Выбрать файлы</button>
+          <input id="fileInput" type="file" multiple hidden>
+        </div>
+
+        <div id="dropZone" class="drop-zone" tabindex="0" role="button">
+          <strong>Перетащите файлы сюда</strong>
+          <span>или нажмите, чтобы выбрать на устройстве</span>
+        </div>
+
+        <div id="uploadQueue" class="upload-queue hidden"></div>
+        <div id="fileList" class="file-list"></div>
+      </section>
+    </div>
   </main>
 
   <div id="toastHost" class="toast-host"></div>

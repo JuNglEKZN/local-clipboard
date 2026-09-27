@@ -2,8 +2,8 @@ import logging
 import secrets
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI, Form, HTTPException, Request, Response, WebSocket, WebSocketDisconnect, status
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile, WebSocket, WebSocketDisconnect, status
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from sqlalchemy.orm import Session
@@ -20,7 +20,8 @@ from app.auth import (
 from app.cleanup import run_cleanup
 from app.config import Settings, get_settings
 from app.database import SessionLocal, get_db, init_db
-from app.schemas import ClipboardIn, ClipboardOut, ClipboardUpdate, HistoryOut, PublicConfig
+from app.file_services import delete_file, get_file, list_files, save_file, storage_dir, total_file_bytes
+from app.schemas import ClipboardIn, ClipboardOut, ClipboardUpdate, FileListOut, FileOut, HistoryOut, PublicConfig
 from app.services import clear_history, create_entry, delete_entry, get_history, get_latest, serialize_entry, update_entry
 from app.websocket import manager
 
@@ -41,7 +42,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Local Clipboard stopped")
 
 
-app = FastAPI(title="Local Clipboard", version="1.0.0", lifespan=lifespan)
+app = FastAPI(title="Local Clipboard", version="2.0.0", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
@@ -50,7 +51,8 @@ app.mount("/static", StaticFiles(directory="app/static"), name="static")
 async def security_and_size_middleware(request: Request, call_next):
     settings = get_settings()
     content_length = request.headers.get("content-length")
-    if content_length and int(content_length) > settings.max_entry_bytes + 8192:
+    request_limit = settings.max_file_bytes + 1024 * 1024 if request.url.path == "/api/files" else settings.max_entry_bytes + 8192
+    if content_length and int(content_length) > request_limit:
         return JSONResponse(status_code=413, content={"detail": "Request body is too large."})
     response = await call_next(request)
     response.headers["X-Content-Type-Options"] = "nosniff"
@@ -149,7 +151,57 @@ async def public_config(settings: Settings = Depends(get_settings)):
         max_entry_bytes=settings.max_entry_bytes,
         max_history_items=settings.max_history_items,
         retention_days=settings.retention_days,
+        max_file_bytes=settings.max_file_bytes,
+        max_file_storage_bytes=settings.max_file_storage_bytes,
     )
+
+
+@app.get("/api/files", response_model=FileListOut)
+async def api_files(request: Request, db: Session = Depends(get_db), settings: Settings = Depends(get_settings)):
+    api_or_session_auth(request, settings)
+    return FileListOut(items=list_files(db), total_bytes=total_file_bytes(db))
+
+
+@app.post("/api/files", response_model=FileOut, status_code=status.HTTP_201_CREATED)
+async def api_upload_file(
+    request: Request,
+    upload: UploadFile = File(...),
+    source: str | None = Form(None),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    api_or_session_auth(request, settings, write=True)
+    entry = await save_file(db, upload, source, settings)
+    await manager.broadcast("files_changed", {"id": entry.id})
+    return entry
+
+
+@app.get("/api/files/{file_id}/download")
+async def api_download_file(
+    file_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    api_or_session_auth(request, settings)
+    entry = get_file(db, file_id)
+    path = storage_dir(settings) / entry.stored_name
+    if not path.is_file():
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File data not found")
+    return FileResponse(path, media_type=entry.content_type, filename=entry.original_name)
+
+
+@app.delete("/api/files/{file_id}", status_code=status.HTTP_204_NO_CONTENT)
+async def api_delete_file(
+    file_id: int,
+    request: Request,
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    api_or_session_auth(request, settings, write=True)
+    delete_file(db, get_file(db, file_id), settings)
+    await manager.broadcast("files_changed", {"id": file_id})
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
 @app.get("/api/clipboard", response_model=ClipboardOut | None)

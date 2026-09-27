@@ -1,6 +1,6 @@
-# Local Clipboard
+# Local Clipboard 2
 
-Self-hosted локальный веб-буфер для обмена текстом между iPhone, Mac, Windows и любым устройством с браузером. Приложение рассчитано на одну локальную сеть, запускается в Docker и не требует расширений браузера или прав администратора на рабочем Windows-компьютере.
+Self-hosted локальный веб-буфер и файловый ящик для обмена текстом и файлами между iPhone, Mac, Windows и любым устройством с браузером. Приложение рассчитано на одну локальную сеть, запускается в Docker и не требует расширений браузера или прав администратора на рабочем Windows-компьютере.
 
 ## Возможности
 
@@ -12,6 +12,8 @@ Self-hosted локальный веб-буфер для обмена текст�
 - Вход по паролю для веб-интерфейса и Bearer token для API.
 - SQLite в WAL-режиме, автоочистка по количеству, сроку хранения и размеру БД.
 - Светлая/темная тема с ручным переключателем.
+- Загрузка нескольких файлов, drag-and-drop, прогресс, скачивание и удаление.
+- Постоянное хранение файлов в Docker-томе, отдельно от образа приложения.
 
 Markdown реализован локальным JavaScript-парсером в `app/static/app.js`; внешние CDN и vendor-библиотеки не используются.
 
@@ -59,11 +61,30 @@ http://IP_СЕРВЕРА:8080
 | `RETENTION_DAYS` | `30` |
 | `MAX_DATABASE_BYTES` | `104857600` |
 | `DATABASE_PATH` | `/data/clipboard.db` |
+| `FILE_STORAGE_PATH` | `/data/files` |
+| `MAX_FILE_BYTES` | `104857600` (100 МБ) |
+| `MAX_FILE_STORAGE_BYTES` | `2147483648` (2 ГБ) |
 | `TIMEZONE` | `Europe/Amsterdam` |
 
 Если `APP_PASSWORD`, `API_TOKEN` или `SESSION_SECRET` не заданы либо равны `change-me`, приложение откажется запускаться. Для локальной разработки можно временно включить `DEV_MODE=true`.
 
 ## API
+
+Загрузить файл:
+
+```bash
+curl -X POST "http://SERVER_IP:8080/api/files" \
+  -H "Authorization: Bearer YOUR_API_TOKEN" \
+  -F "upload=@/path/to/file" \
+  -F "source=mac"
+```
+
+Получить список файлов:
+
+```bash
+curl "http://SERVER_IP:8080/api/files" \
+  -H "Authorization: Bearer YOUR_API_TOKEN"
+```
 
 Сохранить текст:
 
@@ -83,6 +104,10 @@ curl "http://SERVER_IP:8080/api/clipboard" \
 
 Endpoint:
 
+- `GET /api/files`
+- `POST /api/files`
+- `GET /api/files/{id}/download`
+- `DELETE /api/files/{id}`
 - `GET /api/clipboard`
 - `POST /api/clipboard`
 - `PUT /api/clipboard/{id}`
@@ -93,7 +118,7 @@ Endpoint:
 - `GET /api/config`
 - `WebSocket /ws`
 
-При превышении размера записи сервер возвращает HTTP `413`.
+При превышении размера записи или файла сервер возвращает HTTP `413`.
 
 ## Apple Shortcuts
 
@@ -159,6 +184,16 @@ clipboard.local {
 - 1-2 GB диска.
 
 Готовый install-скрипт находится в `scripts/install-proxmox.sh`. Он рассчитан на репозиторий `https://github.com/JuNglEKZN/local-clipboard.git`; при необходимости можно переопределить `REPO_URL`.
+
+Обновление существующей установки до версии 2 сохраняет пароль, историю и Docker-том:
+
+```bash
+cd /opt/local-clipboard
+git pull
+docker compose up -d --build
+```
+
+Для файлового хранилища рекомендуется выделить контейнеру не менее 4 ГБ диска.
 
 ## Разработка
 

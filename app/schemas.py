@@ -47,6 +47,35 @@ class PublicConfig(BaseModel):
     max_entry_bytes: int
     max_history_items: int
     retention_days: int
+    max_file_bytes: int
+    max_file_storage_bytes: int
+
+
+class FileOut(BaseModel):
+    id: int
+    original_name: str
+    content_type: str
+    size_bytes: int
+    created_at: datetime
+    source: str | None = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @field_serializer("created_at")
+    def serialize_created_at(self, value: datetime) -> str:
+        settings = get_settings()
+        try:
+            zone = ZoneInfo(settings.timezone)
+        except Exception:
+            zone = ZoneInfo("UTC")
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=zone)
+        return value.isoformat()
+
+
+class FileListOut(BaseModel):
+    items: list[FileOut]
+    total_bytes: int
 
 
 class ErrorMessage(BaseModel):
