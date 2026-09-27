@@ -29,6 +29,19 @@
   const uploadQueue = document.getElementById("uploadQueue");
   const fileList = document.getElementById("fileList");
   const storageUsage = document.getElementById("storageUsage");
+  const nearbyTab = document.getElementById("nearbyTab");
+  const nearbyView = document.getElementById("nearbyView");
+  const nearbyStatus = document.getElementById("nearbyStatus");
+  const deviceNameInput = document.getElementById("deviceName");
+  const peerList = document.getElementById("peerList");
+  const peerFileInput = document.getElementById("peerFileInput");
+  const transferList = document.getElementById("transferList");
+  const clearTransfersBtn = document.getElementById("clearTransfersBtn");
+  const incomingTransfer = document.getElementById("incomingTransfer");
+  const incomingFrom = document.getElementById("incomingFrom");
+  const incomingFiles = document.getElementById("incomingFiles");
+  const acceptTransferBtn = document.getElementById("acceptTransferBtn");
+  const rejectTransferBtn = document.getElementById("rejectTransferBtn");
 
   let currentEntry = null;
   let savedText = "";
@@ -36,6 +49,17 @@
   let incomingEntry = null;
   let ws = null;
   let reconnectTimer = null;
+  let peers = [];
+  let selectedPeerId = null;
+  let incomingContext = null;
+  const peerContexts = new Map();
+  const pendingCandidates = new Map();
+  const receivedUrls = [];
+
+  const CHUNK_SIZE = 16 * 1024;
+  const MAX_BUFFERED_AMOUNT = 1024 * 1024;
+  const MAX_DIRECT_BYTES = 256 * 1024 * 1024;
+  const WebRTCConnection = window.RTCPeerConnection;
 
   function request(path, options) {
     const opts = options || {};
@@ -241,12 +265,16 @@
 
   function switchSection(section) {
     const showFiles = section === "files";
-    clipboardView.classList.toggle("hidden", showFiles);
+    const showNearby = section === "nearby";
+    clipboardView.classList.toggle("hidden", showFiles || showNearby);
     filesView.classList.toggle("hidden", !showFiles);
-    clipboardTab.classList.toggle("active", !showFiles);
+    nearbyView.classList.toggle("hidden", !showNearby);
+    clipboardTab.classList.toggle("active", !showFiles && !showNearby);
     filesTab.classList.toggle("active", showFiles);
+    nearbyTab.classList.toggle("active", showNearby);
     localStorage.setItem("section", section);
     if (showFiles) loadFiles().catch((error) => toast(error.message));
+    if (showNearby) renderPeers();
   }
 
   async function loadFiles() {
@@ -333,6 +361,373 @@
     if (uploaded) toast(uploaded === 1 ? "Файл загружен" : `Загружено файлов: ${uploaded}`);
   }
 
+  function detectDevice() {
+    const agent = navigator.userAgent;
+    if (/iPad/i.test(agent) || (/Macintosh/i.test(agent) && navigator.maxTouchPoints > 1)) {
+      return { name: "iPad", type: "tablet" };
+    }
+    if (/iPhone/i.test(agent)) return { name: "iPhone", type: "phone" };
+    if (/Android/i.test(agent) && /Mobile/i.test(agent)) return { name: "Android", type: "phone" };
+    if (/Android/i.test(agent)) return { name: "Android планшет", type: "tablet" };
+    if (/Macintosh|Mac OS X/i.test(agent)) return { name: "Mac", type: "desktop" };
+    if (/Windows/i.test(agent)) return { name: "Windows", type: "desktop" };
+    if (/Linux/i.test(agent)) return { name: "Linux", type: "desktop" };
+    return { name: "Устройство", type: "desktop" };
+  }
+
+  const detectedDevice = detectDevice();
+  deviceNameInput.value = localStorage.getItem("deviceName") || detectedDevice.name;
+
+  function sendSocket(event, payload) {
+    if (!ws || ws.readyState !== WebSocket.OPEN) return false;
+    ws.send(JSON.stringify({ event, payload }));
+    return true;
+  }
+
+  function registerPeer() {
+    sendSocket("peer_register", {
+      name: deviceNameInput.value.trim() || detectedDevice.name,
+      device_type: detectedDevice.type
+    });
+  }
+
+  function peerById(peerId) {
+    return peers.find((peer) => peer.id === peerId);
+  }
+
+  function renderPeers() {
+    peerList.innerHTML = "";
+    if (!WebRTCConnection) {
+      nearbyStatus.textContent = "Браузер не поддерживает прямую передачу";
+      const unsupported = document.createElement("p");
+      unsupported.className = "notice error";
+      unsupported.textContent = "Обновите Safari, Chrome, Edge или Firefox. Файловое хранилище продолжает работать.";
+      peerList.appendChild(unsupported);
+      return;
+    }
+    nearbyStatus.textContent = peers.length ? `Найдено устройств: ${peers.length}` : "Других устройств пока нет";
+    if (!peers.length) {
+      const empty = document.createElement("p");
+      empty.className = "muted";
+      empty.textContent = "Откройте Local Clipboard на другом устройстве в этой сети.";
+      peerList.appendChild(empty);
+      return;
+    }
+    peers.forEach((peer) => {
+      const card = document.createElement("div");
+      card.className = "peer-card";
+      const glyph = document.createElement("div");
+      glyph.className = `device-glyph ${peer.device_type}`;
+      glyph.setAttribute("aria-hidden", "true");
+      const details = document.createElement("div");
+      details.className = "peer-details";
+      const name = document.createElement("span");
+      name.className = "peer-name";
+      name.textContent = peer.name;
+      const send = document.createElement("button");
+      send.type = "button";
+      send.className = "primary";
+      send.dataset.peerId = peer.id;
+      send.textContent = "Отправить файлы";
+      details.append(name, send);
+      card.append(glyph, details);
+      peerList.appendChild(card);
+    });
+  }
+
+  function transferId() {
+    const bytes = new Uint8Array(12);
+    crypto.getRandomValues(bytes);
+    return Array.from(bytes, (value) => value.toString(16).padStart(2, "0")).join("");
+  }
+
+  function createTransferNode(context, title, state) {
+    const empty = transferList.querySelector(".empty-transfers");
+    if (empty) empty.remove();
+    const item = document.createElement("div");
+    item.className = "transfer-item";
+    item.dataset.state = "active";
+    const header = document.createElement("div");
+    header.className = "transfer-header";
+    const titleNode = document.createElement("span");
+    titleNode.className = "transfer-title";
+    titleNode.textContent = title;
+    const stateNode = document.createElement("span");
+    stateNode.className = "transfer-state";
+    stateNode.textContent = state;
+    const progress = document.createElement("progress");
+    progress.max = 100;
+    progress.value = 0;
+    const downloads = document.createElement("div");
+    downloads.className = "transfer-downloads";
+    header.append(titleNode, stateNode);
+    item.append(header, progress, downloads);
+    transferList.prepend(item);
+    context.node = item;
+    context.stateNode = stateNode;
+    context.progressNode = progress;
+    context.downloadsNode = downloads;
+  }
+
+  function setTransferState(context, state, completed) {
+    if (!context.node) return;
+    context.stateNode.textContent = state;
+    if (completed) {
+      context.node.dataset.state = "complete";
+      context.progressNode.value = 100;
+    }
+  }
+
+  function updateTransferProgress(context) {
+    if (!context.node) return;
+    const total = Math.max(context.totalBytes || 0, 1);
+    context.progressNode.value = Math.min(100, Math.round((context.doneBytes / total) * 100));
+    context.stateNode.textContent = `${formatBytes(context.doneBytes)} / ${formatBytes(context.totalBytes || 0)}`;
+  }
+
+  function signalPeer(peerId, signal) {
+    sendSocket("peer_signal", { target: peerId, signal });
+  }
+
+  function createPeerContext(peerId, direction) {
+    const pc = new WebRTCConnection({ iceServers: [] });
+    const context = {
+      id: transferId(),
+      peerId,
+      direction,
+      pc,
+      channel: null,
+      files: [],
+      totalBytes: 0,
+      doneBytes: 0,
+      currentFile: null,
+      node: null,
+      completed: false,
+      connectTimer: null
+    };
+    peerContexts.set(peerId, context);
+    pc.onicecandidate = (event) => {
+      if (event.candidate) signalPeer(peerId, { candidate: event.candidate.toJSON() });
+    };
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === "failed" && !context.completed) {
+        setTransferState(context, "Соединение прервано", true);
+        context.completed = true;
+        if (incomingContext === context) {
+          incomingContext = null;
+          incomingTransfer.classList.add("hidden");
+          toast("Передача прервана");
+        }
+      } else if (pc.connectionState === "disconnected" && !context.completed) {
+        setTransferState(context, "Соединение нестабильно");
+      }
+    };
+    const queued = pendingCandidates.get(peerId) || [];
+    pendingCandidates.delete(peerId);
+    context.queuedCandidates = queued;
+    context.connectTimer = setTimeout(() => {
+      if (!context.completed && (!context.channel || context.channel.readyState !== "open")) {
+        setTransferState(context, "Не удалось соединиться. Проверьте сеть и HTTPS", true);
+        context.completed = true;
+        context.pc.close();
+      }
+    }, 20000);
+    return context;
+  }
+
+  async function applyQueuedCandidates(context) {
+    for (const candidate of context.queuedCandidates || []) {
+      await context.pc.addIceCandidate(candidate).catch(() => {});
+    }
+    context.queuedCandidates = [];
+  }
+
+  function sendChannelJson(context, payload) {
+    if (context.channel && context.channel.readyState === "open") {
+      context.channel.send(JSON.stringify(payload));
+    }
+  }
+
+  function addReceivedFile(context, metadata, chunks) {
+    const blob = new Blob(chunks, { type: metadata.type || "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    receivedUrls.push(url);
+    const link = document.createElement("a");
+    link.className = "download-link";
+    link.href = url;
+    link.download = metadata.name;
+    link.textContent = `Сохранить ${metadata.name}`;
+    context.downloadsNode.appendChild(link);
+  }
+
+  function showIncomingOffer(context, message) {
+    if (incomingContext && incomingContext !== context) {
+      sendChannelJson(context, { type: "response", accepted: false });
+      return;
+    }
+    context.files = Array.isArray(message.files) ? message.files : [];
+    context.totalBytes = Number(message.totalBytes) || 0;
+    if (context.totalBytes > MAX_DIRECT_BYTES) {
+      sendChannelJson(context, { type: "response", accepted: false });
+      context.completed = true;
+      context.pc.close();
+      toast("Входящий пакет превышает лимит 256 МБ");
+      return;
+    }
+    incomingContext = context;
+    const peer = peerById(context.peerId);
+    incomingFrom.textContent = `${peer ? peer.name : "Устройство"} хочет отправить ${context.files.length} ${fileWord(context.files.length)}, ${formatBytes(context.totalBytes)}`;
+    incomingFiles.innerHTML = "";
+    context.files.forEach((file) => {
+      const row = document.createElement("div");
+      row.className = "incoming-file";
+      row.textContent = `${file.name} · ${formatBytes(file.size)}`;
+      incomingFiles.appendChild(row);
+    });
+    incomingTransfer.classList.remove("hidden");
+  }
+
+  function handleChannelMessage(context, event) {
+    if (typeof event.data !== "string") {
+      if (!context.currentFile) return;
+      context.currentFile.chunks.push(event.data);
+      context.doneBytes += event.data.byteLength;
+      updateTransferProgress(context);
+      return;
+    }
+    let message;
+    try { message = JSON.parse(event.data); } catch (_error) { return; }
+    if (message.type === "offer") {
+      showIncomingOffer(context, message);
+    } else if (message.type === "response") {
+      if (message.accepted) {
+        setTransferState(context, "Отправка...");
+        sendPeerFiles(context).catch(() => setTransferState(context, "Ошибка передачи", true));
+      } else {
+        setTransferState(context, "Получатель отклонил", true);
+        context.completed = true;
+        context.pc.close();
+      }
+    } else if (message.type === "file-start") {
+      context.currentFile = { metadata: context.files[message.index], chunks: [] };
+    } else if (message.type === "file-end" && context.currentFile) {
+      addReceivedFile(context, context.currentFile.metadata, context.currentFile.chunks);
+      context.currentFile = null;
+    } else if (message.type === "complete") {
+      context.completed = true;
+      setTransferState(context, "Получено", true);
+      setTimeout(() => context.pc.close(), 600);
+    }
+  }
+
+  function wireDataChannel(context, channel) {
+    context.channel = channel;
+    channel.binaryType = "arraybuffer";
+    channel.bufferedAmountLowThreshold = 256 * 1024;
+    channel.onmessage = (event) => handleChannelMessage(context, event);
+    channel.onerror = () => setTransferState(context, "Ошибка соединения", true);
+    channel.onopen = () => {
+      clearTimeout(context.connectTimer);
+      if (context.direction === "send") {
+        sendChannelJson(context, {
+          type: "offer",
+          files: context.files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+          totalBytes: context.totalBytes
+        });
+        setTransferState(context, "Ожидание подтверждения");
+      }
+    };
+  }
+
+  function waitForChannelBuffer(channel) {
+    if (channel.bufferedAmount <= MAX_BUFFERED_AMOUNT) return Promise.resolve();
+    return new Promise((resolve) => {
+      const check = () => {
+        if (channel.bufferedAmount <= channel.bufferedAmountLowThreshold || channel.readyState !== "open") {
+          channel.removeEventListener("bufferedamountlow", check);
+          resolve();
+        }
+      };
+      channel.addEventListener("bufferedamountlow", check);
+      setTimeout(check, 100);
+    });
+  }
+
+  async function sendPeerFiles(context) {
+    for (let index = 0; index < context.files.length; index += 1) {
+      const file = context.files[index];
+      sendChannelJson(context, { type: "file-start", index });
+      for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+        if (context.channel.readyState !== "open") throw new Error("channel closed");
+        await waitForChannelBuffer(context.channel);
+        const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+        context.channel.send(chunk);
+        context.doneBytes += chunk.byteLength;
+        updateTransferProgress(context);
+      }
+      sendChannelJson(context, { type: "file-end", index });
+    }
+    sendChannelJson(context, { type: "complete" });
+    context.completed = true;
+    setTransferState(context, "Отправлено", true);
+    setTimeout(() => context.pc.close(), 1000);
+  }
+
+  async function startPeerTransfer(peerId, fileCollection) {
+    const files = Array.from(fileCollection || []);
+    if (!files.length) return;
+    const totalBytes = files.reduce((total, file) => total + file.size, 0);
+    if (totalBytes > MAX_DIRECT_BYTES) {
+      toast("Для прямой передачи выберите не более 256 МБ за один раз");
+      return;
+    }
+    const existing = peerContexts.get(peerId);
+    if (existing && !existing.completed) {
+      toast("Передача с этим устройством уже выполняется");
+      return;
+    }
+    if (existing) existing.pc.close();
+    const context = createPeerContext(peerId, "send");
+    context.files = files;
+    context.totalBytes = totalBytes;
+    const peer = peerById(peerId);
+    createTransferNode(context, `Для ${peer ? peer.name : "устройства"}: ${files.map((file) => file.name).join(", ")}`, "Подключение...");
+    const channel = context.pc.createDataChannel("local-clipboard-files", { ordered: true });
+    wireDataChannel(context, channel);
+    const offer = await context.pc.createOffer();
+    await context.pc.setLocalDescription(offer);
+    signalPeer(peerId, { description: context.pc.localDescription });
+  }
+
+  async function handlePeerSignal(payload) {
+    const peerId = payload.from;
+    const signal = payload.signal || {};
+    let context = peerContexts.get(peerId);
+    if (signal.description && signal.description.type === "offer") {
+      if (context) context.pc.close();
+      context = createPeerContext(peerId, "receive");
+      context.pc.ondatachannel = (event) => wireDataChannel(context, event.channel);
+      await context.pc.setRemoteDescription(signal.description);
+      await applyQueuedCandidates(context);
+      const answer = await context.pc.createAnswer();
+      await context.pc.setLocalDescription(answer);
+      signalPeer(peerId, { description: context.pc.localDescription });
+    } else if (signal.description && context) {
+      await context.pc.setRemoteDescription(signal.description);
+      await applyQueuedCandidates(context);
+    } else if (signal.candidate) {
+      if (context && context.pc.remoteDescription) {
+        await context.pc.addIceCandidate(signal.candidate).catch(() => {});
+      } else if (context) {
+        context.queuedCandidates.push(signal.candidate);
+      } else {
+        const queued = pendingCandidates.get(peerId) || [];
+        queued.push(signal.candidate);
+        pendingCandidates.set(peerId, queued);
+      }
+    }
+  }
+
   async function saveText() {
     const body = JSON.stringify({ text: textArea.value, source: "web" });
     const entry = await request("/api/clipboard", { method: "POST", body });
@@ -394,6 +789,28 @@
     };
     ws.onmessage = async (message) => {
       const data = JSON.parse(message.data);
+      if (data.event === "peer_identity") {
+        registerPeer();
+      }
+      if (data.event === "peers_changed") {
+        peers = data.payload.items || [];
+        renderPeers();
+        for (const [peerId, context] of peerContexts) {
+          if (!peerById(peerId) && !context.completed) {
+            setTransferState(context, "Устройство отключилось", true);
+            context.completed = true;
+            context.pc.close();
+            if (incomingContext === context) {
+              incomingContext = null;
+              incomingTransfer.classList.add("hidden");
+              toast("Отправитель отключился");
+            }
+          }
+        }
+      }
+      if (data.event === "peer_signal") {
+        await handlePeerSignal(data.payload).catch(() => toast("Не удалось установить прямое соединение"));
+      }
       if (data.event === "clipboard_updated") {
         await loadHistory();
         if (dirty) {
@@ -470,6 +887,7 @@
 
   clipboardTab.addEventListener("click", () => switchSection("clipboard"));
   filesTab.addEventListener("click", () => switchSection("files"));
+  nearbyTab.addEventListener("click", () => switchSection("nearby"));
   chooseFilesBtn.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("click", () => fileInput.click());
   dropZone.addEventListener("keydown", (event) => {
@@ -500,6 +918,53 @@
     }
   });
 
+  deviceNameInput.addEventListener("change", () => {
+    const value = deviceNameInput.value.trim() || detectedDevice.name;
+    deviceNameInput.value = value;
+    localStorage.setItem("deviceName", value);
+    registerPeer();
+  });
+  peerList.addEventListener("click", (event) => {
+    const button = event.target.closest("button[data-peer-id]");
+    if (!button) return;
+    selectedPeerId = button.dataset.peerId;
+    peerFileInput.click();
+  });
+  peerFileInput.addEventListener("change", () => {
+    if (selectedPeerId) {
+      startPeerTransfer(selectedPeerId, peerFileInput.files).catch((error) => {
+        const context = peerContexts.get(selectedPeerId);
+        if (context) setTransferState(context, "Не удалось подключиться", true);
+        toast(error && error.message ? error.message : "Не удалось начать передачу");
+      });
+    }
+    peerFileInput.value = "";
+  });
+  acceptTransferBtn.addEventListener("click", () => {
+    if (!incomingContext) return;
+    const peer = peerById(incomingContext.peerId);
+    createTransferNode(incomingContext, `От ${peer ? peer.name : "устройства"}: ${incomingContext.files.map((file) => file.name).join(", ")}`, "Получение...");
+    sendChannelJson(incomingContext, { type: "response", accepted: true });
+    incomingTransfer.classList.add("hidden");
+    incomingContext = null;
+  });
+  rejectTransferBtn.addEventListener("click", () => {
+    if (incomingContext) {
+      const rejected = incomingContext;
+      sendChannelJson(rejected, { type: "response", accepted: false });
+      rejected.completed = true;
+      setTimeout(() => rejected.pc.close(), 300);
+    }
+    incomingContext = null;
+    incomingTransfer.classList.add("hidden");
+  });
+  clearTransfersBtn.addEventListener("click", () => {
+    transferList.querySelectorAll('.transfer-item[data-state="complete"]').forEach((item) => item.remove());
+    if (!transferList.querySelector(".transfer-item")) {
+      transferList.innerHTML = '<p class="muted empty-transfers">Активных передач нет.</p>';
+    }
+  });
+
   themeToggle.addEventListener("click", () => {
     const current = document.documentElement.dataset.theme || "auto";
     const next = current === "dark" ? "light" : "dark";
@@ -508,7 +973,13 @@
   });
   const storedTheme = localStorage.getItem("theme");
   if (storedTheme) document.documentElement.dataset.theme = storedTheme;
-  switchSection(localStorage.getItem("section") === "files" ? "files" : "clipboard");
+  const storedSection = localStorage.getItem("section");
+  switchSection(["files", "nearby"].includes(storedSection) ? storedSection : "clipboard");
+
+  window.addEventListener("unload", () => {
+    peerContexts.forEach((context) => context.pc.close());
+    receivedUrls.forEach((url) => URL.revokeObjectURL(url));
+  });
 
   loadInitial().catch((error) => toast(error.message));
   connectWebSocket();

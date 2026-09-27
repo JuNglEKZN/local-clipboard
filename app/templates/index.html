@@ -26,6 +26,7 @@
     <nav class="app-tabs" aria-label="Разделы">
       <button id="clipboardTab" class="app-tab active" type="button">Текст</button>
       <button id="filesTab" class="app-tab" type="button">Файлы</button>
+      <button id="nearbyTab" class="app-tab" type="button">Рядом</button>
     </nav>
 
     <div id="clipboardView" class="app-view">
@@ -77,6 +78,33 @@
         <div id="fileList" class="file-list"></div>
       </section>
     </div>
+
+    <div id="nearbyView" class="app-view hidden">
+      <section class="devices-panel">
+        <div class="section-heading nearby-heading">
+          <div>
+            <h2>Устройства рядом</h2>
+            <p id="nearbyStatus" class="muted">Поиск устройств...</p>
+          </div>
+          <div class="device-name-control">
+            <label for="deviceName">Имя этого устройства</label>
+            <input id="deviceName" type="text" maxlength="40" autocomplete="off">
+          </div>
+        </div>
+        <div id="peerList" class="peer-list"></div>
+        <input id="peerFileInput" type="file" multiple hidden>
+      </section>
+
+      <section class="transfers-panel">
+        <div class="section-heading">
+          <h2>Передачи</h2>
+          <button id="clearTransfersBtn" class="ghost" type="button">Очистить завершённые</button>
+        </div>
+        <div id="transferList" class="transfer-list">
+          <p class="muted empty-transfers">Активных передач нет.</p>
+        </div>
+      </section>
+    </div>
   </main>
 
   <div id="toastHost" class="toast-host"></div>
@@ -84,6 +112,17 @@
     <span>На сервере появился новый текст. Открыть его?</span>
     <button id="openIncomingBtn" type="button">Открыть</button>
     <button id="keepCurrentBtn" type="button">Оставить текущий</button>
+  </div>
+  <div id="incomingTransfer" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="incomingTitle">
+    <div class="transfer-dialog">
+      <h2 id="incomingTitle">Входящие файлы</h2>
+      <p id="incomingFrom" class="muted"></p>
+      <div id="incomingFiles" class="incoming-files"></div>
+      <div class="dialog-actions">
+        <button id="rejectTransferBtn" type="button" class="ghost">Отклонить</button>
+        <button id="acceptTransferBtn" type="button" class="primary">Принять</button>
+      </div>
+    </div>
   </div>
   <script src="/static/app.js"></script>
 </body>

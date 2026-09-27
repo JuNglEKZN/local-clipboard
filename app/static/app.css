@@ -102,7 +102,7 @@ h2 { font-size: 20px; }
   gap: 18px;
 }
 
-.editor-panel, .history-panel, .files-panel, .login-card {
+.editor-panel, .history-panel, .files-panel, .devices-panel, .transfers-panel, .login-card {
   background: var(--panel);
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -112,7 +112,7 @@ h2 { font-size: 20px; }
 .editor-panel { padding: 14px; }
 .app-tabs {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 160px));
+  grid-template-columns: repeat(3, minmax(0, 160px));
   gap: 4px;
   border-bottom: 1px solid var(--line);
 }
@@ -170,6 +170,7 @@ h2 { font-size: 20px; }
 
 .history-panel { padding: 14px; }
 .files-panel { padding: 14px; }
+.devices-panel, .transfers-panel { padding: 14px; }
 .muted { color: var(--muted); }
 .files-heading > div { min-width: 0; }
 
@@ -243,6 +244,113 @@ progress {
   height: 8px;
   accent-color: var(--accent);
 }
+
+.nearby-heading { align-items: end; }
+.device-name-control {
+  display: grid;
+  gap: 4px;
+  width: min(100%, 260px);
+}
+.device-name-control label { color: var(--muted); font-size: 13px; }
+.device-name-control input {
+  min-height: 44px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.peer-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+  gap: 10px;
+}
+
+.peer-card {
+  min-height: 150px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 14px;
+}
+
+.device-glyph {
+  width: 40px;
+  height: 58px;
+  border: 3px solid var(--accent);
+  border-radius: 7px;
+  position: relative;
+}
+.device-glyph::after {
+  content: "";
+  position: absolute;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+  left: 50%;
+  bottom: 3px;
+  transform: translateX(-50%);
+}
+.device-glyph.tablet { width: 48px; height: 58px; }
+.device-glyph.desktop {
+  width: 64px;
+  height: 42px;
+  border-radius: 5px;
+  margin-bottom: 16px;
+}
+.device-glyph.desktop::after {
+  width: 26px;
+  height: 3px;
+  border-radius: 0;
+  bottom: -13px;
+  box-shadow: 0 -5px 0 -1px var(--accent);
+}
+.peer-details { min-width: 0; display: grid; gap: 8px; }
+.peer-name { font-weight: 700; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.peer-details button { width: 100%; }
+
+.transfer-list { display: grid; gap: 10px; }
+.transfer-item {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 12px;
+  display: grid;
+  gap: 8px;
+}
+.transfer-header { display: flex; justify-content: space-between; gap: 12px; }
+.transfer-title { font-weight: 650; overflow-wrap: anywhere; }
+.transfer-state { color: var(--muted); white-space: nowrap; }
+.transfer-downloads { display: flex; flex-wrap: wrap; gap: 8px; }
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: grid;
+  place-items: center;
+  padding: 16px;
+  background: rgba(0, 0, 0, 0.52);
+}
+.transfer-dialog {
+  width: min(100%, 520px);
+  max-height: 85vh;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 18px;
+  background: var(--panel);
+  box-shadow: var(--shadow);
+  display: grid;
+  gap: 12px;
+}
+.incoming-files { display: grid; gap: 6px; }
+.incoming-file { overflow-wrap: anywhere; }
+.dialog-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .section-heading {
   display: flex;
   justify-content: space-between;
@@ -345,10 +453,17 @@ progress {
   .toolbar { grid-template-columns: repeat(2, minmax(0, 1fr)); position: sticky; top: 0; z-index: 5; background: var(--panel); padding-bottom: 8px; }
   .conflict-toast { grid-template-columns: 1fr; }
   #clipboardText, .markdown { min-height: 50vh; }
-  .app-tabs { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .app-tabs { grid-template-columns: repeat(3, minmax(0, 1fr)); }
   .file-item { grid-template-columns: 1fr; }
   .file-actions { width: 100%; }
   .file-actions > * { flex: 1; justify-content: center; }
+  .nearby-heading { align-items: stretch; flex-direction: column; }
+  .device-name-control { width: 100%; }
+  .peer-list { grid-template-columns: 1fr; }
+  .peer-card { min-height: 120px; }
+  .transfer-header { flex-direction: column; gap: 2px; }
+  .transfer-state { white-space: normal; }
+  .dialog-actions > * { flex: 1; }
 }
 
 @media (prefers-color-scheme: dark) {

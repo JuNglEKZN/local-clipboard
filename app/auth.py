@@ -22,8 +22,7 @@ def create_session_value(settings: Settings) -> str:
     return get_serializer(settings).dumps({"authenticated": True, "nonce": secrets.token_urlsafe(16)})
 
 
-def read_session(request: Request, settings: Settings) -> bool:
-    raw = request.cookies.get(SESSION_COOKIE)
+def read_session_value(raw: str | None, settings: Settings) -> bool:
     if not raw:
         return False
     try:
@@ -31,6 +30,10 @@ def read_session(request: Request, settings: Settings) -> bool:
     except (BadSignature, SignatureExpired):
         return False
     return bool(data.get("authenticated"))
+
+
+def read_session(request: Request, settings: Settings) -> bool:
+    return read_session_value(request.cookies.get(SESSION_COOKIE), settings)
 
 
 def require_web_auth(request: Request, settings: Settings = Depends(get_settings)) -> None:

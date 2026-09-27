@@ -124,3 +124,27 @@ def test_file_size_limit_returns_413_and_leaves_no_file():
     assert response.status_code == 413
     assert c.get("/api/files", headers=auth_headers()).json()["items"] == []
     assert list(Path("/tmp/local_clipboard_test_files").iterdir()) == []
+
+
+def test_nearby_devices_discover_and_relay_signals():
+    c = client()
+    assert c.post("/login", data={"password": "test-password"}).status_code == 200
+
+    with c.websocket_connect("/ws") as first:
+        first_id = first.receive_json()["payload"]["id"]
+        first.send_json({"event": "peer_register", "payload": {"name": "Mac", "device_type": "desktop"}})
+        assert first.receive_json()["payload"]["items"] == []
+
+        with c.websocket_connect("/ws") as second:
+            second_id = second.receive_json()["payload"]["id"]
+            second.send_json({"event": "peer_register", "payload": {"name": "iPhone", "device_type": "phone"}})
+
+            first_peers = first.receive_json()["payload"]["items"]
+            second_peers = second.receive_json()["payload"]["items"]
+            assert first_peers == [{"id": second_id, "name": "iPhone", "device_type": "phone"}]
+            assert second_peers == [{"id": first_id, "name": "Mac", "device_type": "desktop"}]
+
+            signal = {"description": {"type": "offer", "sdp": "test-sdp"}}
+            first.send_json({"event": "peer_signal", "payload": {"target": second_id, "signal": signal}})
+            relayed = second.receive_json()
+            assert relayed == {"event": "peer_signal", "payload": {"from": first_id, "signal": signal}}

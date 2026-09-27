@@ -1,3 +1,4 @@
+import json
 import logging
 import secrets
 from contextlib import asynccontextmanager
@@ -12,6 +13,7 @@ from app.auth import (
     CSRF_COOKIE,
     SESSION_COOKIE,
     create_session_value,
+    read_session_value,
     login_limiter,
     read_session,
     require_api_token,
@@ -42,7 +44,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Local Clipboard stopped")
 
 
-app = FastAPI(title="Local Clipboard", version="2.0.0", lifespan=lifespan)
+app = FastAPI(title="Local Clipboard", version="3.0.0", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
@@ -267,13 +269,31 @@ async def api_clear_history(request: Request, db: Session = Depends(get_db), set
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     settings = get_settings()
-    cookie_header = websocket.headers.get("cookie", "")
-    if SESSION_COOKIE not in cookie_header:
+    if not read_session_value(websocket.cookies.get(SESSION_COOKIE), settings):
         await websocket.close(code=1008)
         return
     await manager.connect(websocket)
     try:
         while True:
-            await websocket.receive_text()
+            raw = await websocket.receive_text()
+            if len(raw) > 65536:
+                await websocket.close(code=1009)
+                return
+            try:
+                message = json.loads(raw)
+            except json.JSONDecodeError:
+                continue
+            event = message.get("event")
+            payload = message.get("payload") or {}
+            if event == "peer_register":
+                await manager.register_peer(
+                    websocket,
+                    str(payload.get("name", "")),
+                    str(payload.get("device_type", "desktop")),
+                )
+            elif event == "peer_signal" and isinstance(payload.get("signal"), dict):
+                await manager.relay(websocket, str(payload.get("target", "")), payload["signal"])
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        pass
+    finally:
+        await manager.disconnect(websocket)
