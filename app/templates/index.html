@@ -4,124 +4,147 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="csrf-token" content="{{ csrf_token }}">
+  <meta name="theme-color" content="#087cff">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Clipboard">
   <title>Local Clipboard</title>
+  <link rel="icon" href="/static/app-icon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" sizes="180x180" href="/static/apple-touch-icon.png">
+  <link rel="manifest" href="/static/site.webmanifest">
   <link rel="stylesheet" href="/static/app.css">
 </head>
 <body>
-  <header class="topbar">
-    <div>
-      <h1>Local Clipboard</h1>
-      <p id="lastSaved">Последнее сохранение: нет данных</p>
-    </div>
-    <div class="top-actions">
-      <span id="connection" class="status disconnected">Нет соединения</span>
-      <button id="themeToggle" class="icon-button" type="button" title="Переключить тему">Тема</button>
-      <form method="post" action="/logout">
-        <button class="ghost" type="submit">Выйти</button>
-      </form>
-    </div>
-  </header>
-
-  <main class="shell">
-    <nav class="app-tabs" aria-label="Разделы">
-      <button id="clipboardTab" class="app-tab active" type="button">Текст</button>
-      <button id="filesTab" class="app-tab" type="button">Файлы</button>
-      <button id="nearbyTab" class="app-tab" type="button">Рядом</button>
-    </nav>
-
-    <div id="clipboardView" class="app-view">
-    <section class="editor-panel">
-      <div class="toolbar">
-        <button id="pasteBtn" type="button">Вставить</button>
-        <button id="copyBtn" type="button">Копировать</button>
-        <button id="saveBtn" type="button" class="primary">Сохранить</button>
-        <button id="clearBtn" type="button">Очистить</button>
-        <button id="editorBtn" type="button" class="segmented active">Редактор</button>
-        <button id="previewBtn" type="button" class="segmented">Просмотр</button>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <span class="brand-mark"><svg><use href="/static/icons.svg#clipboard"></use></svg></span>
+        <strong>Local Clipboard</strong>
       </div>
-
-      <textarea id="clipboardText" spellcheck="false" placeholder="Вставьте текст, Markdown, код или ссылку"></textarea>
-      <article id="preview" class="markdown hidden"></article>
-
-      <div class="meta-row">
-        <span id="charCount">0 символов</span>
-        <span id="byteCount">0 КБ</span>
+      <nav class="app-tabs" aria-label="Разделы">
+        <button id="clipboardTab" class="nav-item active" type="button"><svg><use href="/static/icons.svg#file-text"></use></svg><span>Текст</span></button>
+        <button id="filesTab" class="nav-item" type="button"><svg><use href="/static/icons.svg#folder"></use></svg><span>Файлы</span></button>
+        <button id="nearbyTab" class="nav-item" type="button"><svg><use href="/static/icons.svg#radio"></use></svg><span>Рядом</span></button>
+      </nav>
+      <div class="sidebar-footer">
+        <div class="storage-summary">
+          <span id="storageUsage">Загрузка хранилища...</span>
+          <progress id="storageProgress" max="100" value="0"></progress>
+        </div>
+        <div id="connection" class="connection disconnected"><span></span>Нет соединения</div>
+        <form method="post" action="/logout">
+          <button class="nav-item logout" type="submit" title="Выйти"><svg><use href="/static/icons.svg#log-out"></use></svg><span>Выйти</span></button>
+        </form>
       </div>
-    </section>
+    </aside>
 
-    <section class="history-panel">
-      <div class="section-heading">
-        <h2>История</h2>
-        <button id="clearHistoryBtn" type="button" class="danger ghost">Очистить историю</button>
-      </div>
-      <div id="historyList" class="history-list"></div>
-    </section>
-    </div>
-
-    <div id="filesView" class="app-view hidden">
-      <section class="files-panel">
-        <div class="section-heading files-heading">
-          <div>
-            <h2>Файлы</h2>
-            <p id="storageUsage" class="muted">Загрузка списка...</p>
+    <main class="workspace">
+      <div id="clipboardView" class="app-view">
+        <section class="main-pane text-main">
+          <header class="page-heading"><h1>Текст</h1></header>
+          <div class="toolbar">
+            <button id="pasteBtn" type="button"><svg><use href="/static/icons.svg#clipboard-paste"></use></svg><span>Вставить</span></button>
+            <button id="copyBtn" type="button"><svg><use href="/static/icons.svg#copy"></use></svg><span>Копировать</span></button>
+            <button id="saveBtn" type="button"><svg><use href="/static/icons.svg#save"></use></svg><span>Сохранить</span></button>
+            <button id="clearBtn" type="button"><svg><use href="/static/icons.svg#trash"></use></svg><span>Очистить</span></button>
           </div>
-          <button id="chooseFilesBtn" type="button" class="primary">Выбрать файлы</button>
-          <input id="fileInput" type="file" multiple hidden>
-        </div>
+          <textarea id="clipboardText" spellcheck="false" placeholder="Вставьте текст, Markdown, код или ссылку"></textarea>
+          <article id="preview" class="markdown hidden"></article>
+          <div class="section-heading history-heading">
+            <h2>История</h2>
+            <button id="clearHistoryBtn" class="icon-button danger" type="button" title="Очистить историю"><svg><use href="/static/icons.svg#trash"></use></svg></button>
+          </div>
+          <div id="historyList" class="history-list"></div>
+        </section>
+        <aside class="inspector text-inspector">
+          <div class="inspector-icon"><svg><use href="/static/icons.svg#file-text"></use></svg></div>
+          <dl class="details-list">
+            <div><dt>Символов</dt><dd id="charCount">0</dd></div>
+            <div><dt>Размер</dt><dd id="byteCount">0 Б</dd></div>
+            <div><dt>Сохранено</dt><dd id="lastSaved">нет данных</dd></div>
+          </dl>
+          <div class="segmented-control" aria-label="Режим текста">
+            <button id="editorBtn" class="active" type="button"><svg><use href="/static/icons.svg#pencil"></use></svg><span>Редактор</span></button>
+            <button id="previewBtn" type="button"><svg><use href="/static/icons.svg#eye"></use></svg><span>Просмотр</span></button>
+          </div>
+        </aside>
+      </div>
 
-        <div id="dropZone" class="drop-zone" tabindex="0" role="button">
-          <strong>Перетащите файлы сюда</strong>
-          <span>или нажмите, чтобы выбрать на устройстве</span>
-        </div>
+      <div id="filesView" class="app-view hidden">
+        <section class="main-pane files-main">
+          <header class="page-heading heading-actions">
+            <h1>Файлы</h1>
+            <button id="chooseFilesBtn" class="primary" type="button"><svg><use href="/static/icons.svg#upload"></use></svg><span>Загрузить</span></button>
+            <input id="fileInput" type="file" multiple hidden>
+          </header>
+          <div class="file-table-head"><span>Имя</span><span>Размер</span><span>Дата</span></div>
+          <div id="fileList" class="file-list"></div>
+          <div id="dropZone" class="drop-zone" tabindex="0" role="button">
+            <svg><use href="/static/icons.svg#upload"></use></svg><span>Перетащите файлы сюда или нажмите для выбора</span>
+          </div>
+          <div id="uploadQueue" class="upload-queue hidden"></div>
+        </section>
+        <aside class="inspector file-inspector">
+          <div id="fileInspectorEmpty" class="inspector-empty">
+            <div class="inspector-icon"><svg><use href="/static/icons.svg#folder"></use></svg></div>
+            <p>Выберите файл, чтобы увидеть подробности</p>
+          </div>
+          <div id="fileInspectorContent" class="hidden">
+            <div id="selectedFileIcon" class="inspector-icon"><svg><use href="/static/icons.svg#file"></use></svg></div>
+            <h2 id="selectedFileName" class="selected-file-name"></h2>
+            <p id="selectedFileSize" class="muted"></p>
+            <dl class="details-list file-details">
+              <div><dt>Тип</dt><dd id="selectedFileType"></dd></div>
+              <div><dt>Размер</dt><dd id="selectedFileSizeDetail"></dd></div>
+              <div><dt>Добавлен</dt><dd id="selectedFileDate"></dd></div>
+            </dl>
+            <a id="selectedFileDownload" class="button primary full-width" href="#"><svg><use href="/static/icons.svg#download"></use></svg><span>Скачать</span></a>
+            <button id="selectedFileSend" class="full-width" type="button"><svg><use href="/static/icons.svg#radio"></use></svg><span>Отправить рядом</span></button>
+            <button id="selectedFileDelete" class="danger quiet full-width" type="button"><svg><use href="/static/icons.svg#trash"></use></svg><span>Удалить</span></button>
+          </div>
+        </aside>
+      </div>
 
-        <div id="uploadQueue" class="upload-queue hidden"></div>
-        <div id="fileList" class="file-list"></div>
-      </section>
-    </div>
-
-    <div id="nearbyView" class="app-view hidden">
-      <section class="devices-panel">
-        <div class="section-heading nearby-heading">
-          <div>
-            <h2>Устройства рядом</h2>
+      <div id="nearbyView" class="app-view hidden">
+        <section class="main-pane nearby-main">
+          <header class="page-heading">
+            <h1>Устройства рядом</h1>
             <p id="nearbyStatus" class="muted">Поиск устройств...</p>
+          </header>
+          <div id="peerList" class="peer-list"></div>
+          <section class="send-composer" aria-label="Новая передача">
+            <div class="composer-field"><span class="field-label">Получатель</span><strong id="peerDestination">Выберите устройство</strong></div>
+            <button id="choosePeerFilesBtn" class="file-picker" type="button"><svg><use href="/static/icons.svg#file"></use></svg><span id="peerFileSummary">Выбрать файлы</span></button>
+            <input id="peerFileInput" type="file" multiple hidden>
+            <button id="sendPeerFilesBtn" class="primary" type="button" disabled><svg><use href="/static/icons.svg#send"></use></svg><span>Отправить</span></button>
+          </section>
+          <div class="section-heading transfers-heading">
+            <h2>Передачи</h2>
+            <button id="clearTransfersBtn" class="icon-button danger" type="button" title="Очистить завершённые"><svg><use href="/static/icons.svg#trash"></use></svg></button>
           </div>
-          <div class="device-name-control">
-            <label for="deviceName">Имя этого устройства</label>
-            <input id="deviceName" type="text" maxlength="40" autocomplete="off">
-          </div>
-        </div>
-        <div id="peerList" class="peer-list"></div>
-        <input id="peerFileInput" type="file" multiple hidden>
-      </section>
-
-      <section class="transfers-panel">
-        <div class="section-heading">
-          <h2>Передачи</h2>
-          <button id="clearTransfersBtn" class="ghost" type="button">Очистить завершённые</button>
-        </div>
-        <div id="transferList" class="transfer-list">
-          <p class="muted empty-transfers">Активных передач нет.</p>
-        </div>
-      </section>
-    </div>
-  </main>
+          <div id="transferList" class="transfer-list"><p class="muted empty-state empty-transfers">Активных передач нет.</p></div>
+        </section>
+        <aside class="inspector device-inspector">
+          <h2>Это устройство</h2>
+          <div class="current-device"><svg id="currentDeviceIcon"><use href="/static/icons.svg#laptop"></use></svg></div>
+          <strong id="currentDeviceName">Устройство</strong>
+          <div class="connected-label"><span></span>Подключено</div>
+          <label class="input-label" for="deviceName">Имя в Local Clipboard</label>
+          <input id="deviceName" type="text" maxlength="40" autocomplete="off">
+          <p class="field-help">Это имя будет видно на других устройствах в сети.</p>
+        </aside>
+      </div>
+    </main>
+  </div>
 
   <div id="toastHost" class="toast-host"></div>
-  <div id="conflictToast" class="conflict-toast hidden">
-    <span>На сервере появился новый текст. Открыть его?</span>
-    <button id="openIncomingBtn" type="button">Открыть</button>
-    <button id="keepCurrentBtn" type="button">Оставить текущий</button>
-  </div>
+  <div id="conflictToast" class="conflict-toast hidden"><span>На сервере появился новый текст. Открыть его?</span><button id="openIncomingBtn" type="button">Открыть</button><button id="keepCurrentBtn" type="button">Оставить текущий</button></div>
   <div id="incomingTransfer" class="modal-backdrop hidden" role="dialog" aria-modal="true" aria-labelledby="incomingTitle">
     <div class="transfer-dialog">
       <h2 id="incomingTitle">Входящие файлы</h2>
       <p id="incomingFrom" class="muted"></p>
       <div id="incomingFiles" class="incoming-files"></div>
-      <div class="dialog-actions">
-        <button id="rejectTransferBtn" type="button" class="ghost">Отклонить</button>
-        <button id="acceptTransferBtn" type="button" class="primary">Принять</button>
-      </div>
+      <div class="dialog-actions"><button id="rejectTransferBtn" type="button">Отклонить</button><button id="acceptTransferBtn" type="button" class="primary">Принять</button></div>
     </div>
   </div>
   <script src="/static/app.js"></script>

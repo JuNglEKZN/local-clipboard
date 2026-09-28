@@ -17,7 +17,6 @@
   const conflictToast = document.getElementById("conflictToast");
   const openIncomingBtn = document.getElementById("openIncomingBtn");
   const keepCurrentBtn = document.getElementById("keepCurrentBtn");
-  const themeToggle = document.getElementById("themeToggle");
   const csrfToken = document.querySelector("meta[name='csrf-token']").content;
   const clipboardTab = document.getElementById("clipboardTab");
   const filesTab = document.getElementById("filesTab");
@@ -29,12 +28,30 @@
   const uploadQueue = document.getElementById("uploadQueue");
   const fileList = document.getElementById("fileList");
   const storageUsage = document.getElementById("storageUsage");
+  const storageProgress = document.getElementById("storageProgress");
+  const fileInspectorEmpty = document.getElementById("fileInspectorEmpty");
+  const fileInspectorContent = document.getElementById("fileInspectorContent");
+  const selectedFileName = document.getElementById("selectedFileName");
+  const selectedFileSize = document.getElementById("selectedFileSize");
+  const selectedFileType = document.getElementById("selectedFileType");
+  const selectedFileSizeDetail = document.getElementById("selectedFileSizeDetail");
+  const selectedFileDate = document.getElementById("selectedFileDate");
+  const selectedFileDownload = document.getElementById("selectedFileDownload");
+  const selectedFileSend = document.getElementById("selectedFileSend");
+  const selectedFileDelete = document.getElementById("selectedFileDelete");
+  const selectedFileIcon = document.getElementById("selectedFileIcon");
   const nearbyTab = document.getElementById("nearbyTab");
   const nearbyView = document.getElementById("nearbyView");
   const nearbyStatus = document.getElementById("nearbyStatus");
   const deviceNameInput = document.getElementById("deviceName");
   const peerList = document.getElementById("peerList");
   const peerFileInput = document.getElementById("peerFileInput");
+  const choosePeerFilesBtn = document.getElementById("choosePeerFilesBtn");
+  const sendPeerFilesBtn = document.getElementById("sendPeerFilesBtn");
+  const peerDestination = document.getElementById("peerDestination");
+  const peerFileSummary = document.getElementById("peerFileSummary");
+  const currentDeviceName = document.getElementById("currentDeviceName");
+  const currentDeviceIcon = document.getElementById("currentDeviceIcon");
   const transferList = document.getElementById("transferList");
   const clearTransfersBtn = document.getElementById("clearTransfersBtn");
   const incomingTransfer = document.getElementById("incomingTransfer");
@@ -51,6 +68,10 @@
   let reconnectTimer = null;
   let peers = [];
   let selectedPeerId = null;
+  let selectedPeerFiles = [];
+  let storedFiles = [];
+  let selectedFileId = null;
+  let maxStorageBytes = 0;
   let incomingContext = null;
   const peerContexts = new Map();
   const pendingCandidates = new Map();
@@ -60,6 +81,43 @@
   const MAX_BUFFERED_AMOUNT = 1024 * 1024;
   const MAX_DIRECT_BYTES = 256 * 1024 * 1024;
   const WebRTCConnection = window.RTCPeerConnection;
+
+  function icon(name) {
+    return `<svg aria-hidden="true"><use href="/static/icons.svg#${name}"></use></svg>`;
+  }
+
+  function deviceIcon(type) {
+    if (type === "phone") return "smartphone";
+    if (type === "tablet") return "tablet";
+    return "laptop";
+  }
+
+  function fileVisual(entry) {
+    const type = (entry.content_type || "").toLowerCase();
+    const extension = (entry.original_name.split(".").pop() || "").toLowerCase();
+    if (type.startsWith("image/")) return { icon: "image", kind: "image" };
+    if (type.startsWith("audio/")) return { icon: "music", kind: "media" };
+    if (type.startsWith("video/")) return { icon: "video", kind: "media" };
+    if (type === "application/pdf" || extension === "pdf") return { icon: "file-text", kind: "pdf" };
+    if (["xls", "xlsx", "csv", "ods"].includes(extension) || type.includes("spreadsheet") || type.includes("excel")) {
+      return { icon: "sheet", kind: "sheet" };
+    }
+    if (["zip", "rar", "7z", "tar", "gz"].includes(extension) || type.includes("zip") || type.includes("archive")) {
+      return { icon: "archive", kind: "archive" };
+    }
+    if (type.startsWith("text/") || ["md", "rtf", "doc", "docx"].includes(extension)) {
+      return { icon: "file-text", kind: "text" };
+    }
+    return { icon: "file", kind: "generic" };
+  }
+
+  function splitPreview(value) {
+    const lines = value.trim().split(/\r?\n/).filter(Boolean);
+    return {
+      first: lines[0] || "Пустая запись",
+      second: lines.slice(1).join(" ") || ""
+    };
+  }
 
   function request(path, options) {
     const opts = options || {};
@@ -114,7 +172,7 @@
 
   function updateMeta() {
     const value = textArea.value;
-    charCount.textContent = `${Array.from(value).length} символов`;
+    charCount.textContent = String(Array.from(value).length);
     byteCount.textContent = formatBytes(bytesOf(value));
   }
 
@@ -123,7 +181,7 @@
     savedText = entry ? entry.text : "";
     textArea.value = savedText;
     dirty = false;
-    lastSaved.textContent = `Последнее сохранение: ${entry ? formatDate(entry.updated_at) : "нет данных"}`;
+    lastSaved.textContent = entry ? formatDate(entry.updated_at) : "нет данных";
     updateMeta();
     renderPreview();
     if (notify) toast("Получен новый текст");
@@ -243,22 +301,26 @@
     const data = await request("/api/history");
     historyList.innerHTML = "";
     if (!data.items.length) {
-      historyList.innerHTML = "<p class=\"history-time\">История пуста.</p>";
+      historyList.innerHTML = "<p class=\"muted empty-state\">История пуста.</p>";
       return;
     }
     data.items.forEach((entry) => {
       const item = document.createElement("div");
-      item.className = "history-item";
-      const previewText = entry.text.length > 180 ? `${entry.text.slice(0, 180)}...` : entry.text;
+      item.className = `history-item${currentEntry && currentEntry.id === entry.id ? " current" : ""}`;
+      const previewText = splitPreview(entry.text);
       item.innerHTML = `
-        <div class="history-preview"></div>
-        <div><span class="history-time">${formatDate(entry.updated_at)}</span> · <span class="history-size">${formatBytes(entry.size_bytes)}</span></div>
-        <div class="history-actions">
-          <button type="button" data-open="${entry.id}">Открыть</button>
-          <button type="button" data-copy="${entry.id}">Копировать</button>
-          <button type="button" class="danger ghost" data-delete="${entry.id}">Удалить</button>
+        <span class="row-icon">${icon("file-text")}</span>
+        <div class="history-copy" data-open="${entry.id}">
+          <div class="history-preview"></div>
+          <div class="history-secondary"></div>
+        </div>
+        <span class="history-time">${formatDate(entry.updated_at)}</span>
+        <div class="row-actions">
+          <button type="button" data-copy="${entry.id}" title="Копировать">${icon("copy")}</button>
+          <button type="button" class="danger" data-delete="${entry.id}" title="Удалить">${icon("trash")}</button>
         </div>`;
-      item.querySelector(".history-preview").textContent = previewText;
+      item.querySelector(".history-preview").textContent = previewText.first;
+      item.querySelector(".history-secondary").textContent = previewText.second || formatBytes(entry.size_bytes);
       historyList.appendChild(item);
     });
   }
@@ -279,27 +341,77 @@
 
   async function loadFiles() {
     const data = await request("/api/files");
+    storedFiles = data.items;
+    if (selectedFileId && !storedFiles.some((entry) => entry.id === selectedFileId)) selectedFileId = null;
+    if (!selectedFileId && storedFiles.length) selectedFileId = storedFiles[0].id;
     fileList.innerHTML = "";
-    storageUsage.textContent = `${data.items.length} ${fileWord(data.items.length)}, занято ${formatBytes(data.total_bytes)}`;
+    storageUsage.textContent = `Занято ${formatBytes(data.total_bytes)}${maxStorageBytes ? ` из ${formatBytes(maxStorageBytes)}` : ""}`;
+    storageProgress.value = maxStorageBytes ? Math.min(100, Math.round(data.total_bytes / maxStorageBytes * 100)) : 0;
     if (!data.items.length) {
       fileList.innerHTML = "<p class=\"muted\">Файлов пока нет.</p>";
+      renderFileInspector();
       return;
     }
     data.items.forEach((entry) => {
+      const visual = fileVisual(entry);
       const item = document.createElement("div");
-      item.className = "file-item";
+      item.className = `file-item${entry.id === selectedFileId ? " selected" : ""}`;
+      item.dataset.fileId = entry.id;
+      item.tabIndex = 0;
+      item.setAttribute("role", "button");
       item.innerHTML = `
-        <div class="file-info">
+        <div class="file-name-cell">
+          <span class="row-icon file-kind-${visual.kind}">${icon(visual.icon)}</span>
           <span class="file-name"></span>
-          <span class="file-meta">${formatBytes(entry.size_bytes)} · ${formatDate(entry.created_at)}</span>
         </div>
-        <div class="file-actions">
-          <a class="download-link" href="/api/files/${entry.id}/download">Скачать</a>
-          <button type="button" class="danger ghost" data-delete-file="${entry.id}">Удалить</button>
-        </div>`;
+        <span class="file-meta-cell file-size-cell">${formatBytes(entry.size_bytes)}</span>
+        <span class="file-meta-cell file-date-cell">${formatDate(entry.created_at)}</span>`;
       item.querySelector(".file-name").textContent = entry.original_name;
       fileList.appendChild(item);
     });
+    renderFileInspector();
+  }
+
+  function renderFileInspector() {
+    const entry = storedFiles.find((file) => file.id === selectedFileId);
+    fileInspectorEmpty.classList.toggle("hidden", Boolean(entry));
+    fileInspectorContent.classList.toggle("hidden", !entry);
+    if (!entry) return;
+    const visual = fileVisual(entry);
+    selectedFileIcon.className = `inspector-icon file-kind-${visual.kind}`;
+    selectedFileIcon.querySelector("use").setAttribute("href", `/static/icons.svg#${visual.icon}`);
+    selectedFileName.textContent = entry.original_name;
+    selectedFileSize.textContent = formatBytes(entry.size_bytes);
+    selectedFileType.textContent = entry.content_type || "Файл";
+    selectedFileSizeDetail.textContent = formatBytes(entry.size_bytes);
+    selectedFileDate.textContent = formatDate(entry.created_at);
+    selectedFileDownload.href = `/api/files/${entry.id}/download`;
+  }
+
+  async function deleteSelectedFile() {
+    const entry = storedFiles.find((file) => file.id === selectedFileId);
+    if (!entry || !confirm(`Удалить «${entry.original_name}»?`)) return;
+    await request(`/api/files/${entry.id}`, { method: "DELETE" });
+    selectedFileId = null;
+    await loadFiles();
+    toast("Файл удалён");
+  }
+
+  async function prepareStoredFileForNearby() {
+    const entry = storedFiles.find((file) => file.id === selectedFileId);
+    if (!entry) return;
+    selectedFileSend.disabled = true;
+    try {
+      const response = await fetch(`/api/files/${entry.id}/download`);
+      if (!response.ok) throw new Error("Не удалось открыть файл");
+      const blob = await response.blob();
+      selectedPeerFiles = [new File([blob], entry.original_name, { type: entry.content_type || blob.type })];
+      switchSection("nearby");
+      updatePeerComposer();
+      toast("Теперь выберите устройство");
+    } finally {
+      selectedFileSend.disabled = false;
+    }
   }
 
   function uploadFile(file) {
@@ -377,6 +489,8 @@
 
   const detectedDevice = detectDevice();
   deviceNameInput.value = localStorage.getItem("deviceName") || detectedDevice.name;
+  currentDeviceName.textContent = deviceNameInput.value;
+  currentDeviceIcon.querySelector("use").setAttribute("href", `/static/icons.svg#${deviceIcon(detectedDevice.type)}`);
 
   function sendSocket(event, payload) {
     if (!ws || ws.readyState !== WebSocket.OPEN) return false;
@@ -406,33 +520,38 @@
       return;
     }
     nearbyStatus.textContent = peers.length ? `Найдено устройств: ${peers.length}` : "Других устройств пока нет";
+    if (selectedPeerId && !peerById(selectedPeerId)) selectedPeerId = null;
     if (!peers.length) {
       const empty = document.createElement("p");
       empty.className = "muted";
       empty.textContent = "Откройте Local Clipboard на другом устройстве в этой сети.";
       peerList.appendChild(empty);
+      updatePeerComposer();
       return;
     }
     peers.forEach((peer) => {
-      const card = document.createElement("div");
-      card.className = "peer-card";
-      const glyph = document.createElement("div");
-      glyph.className = `device-glyph ${peer.device_type}`;
-      glyph.setAttribute("aria-hidden", "true");
-      const details = document.createElement("div");
-      details.className = "peer-details";
-      const name = document.createElement("span");
-      name.className = "peer-name";
-      name.textContent = peer.name;
-      const send = document.createElement("button");
-      send.type = "button";
-      send.className = "primary";
-      send.dataset.peerId = peer.id;
-      send.textContent = "Отправить файлы";
-      details.append(name, send);
-      card.append(glyph, details);
+      const card = document.createElement("button");
+      card.type = "button";
+      card.dataset.peerId = peer.id;
+      card.className = `peer-card${peer.id === selectedPeerId ? " selected" : ""}`;
+      card.innerHTML = `<span class="online-dot"></span>${icon(deviceIcon(peer.device_type))}<span class="peer-name"></span>`;
+      card.querySelector(".peer-name").textContent = peer.name;
       peerList.appendChild(card);
     });
+    updatePeerComposer();
+  }
+
+  function updatePeerComposer() {
+    const peer = peerById(selectedPeerId);
+    peerDestination.textContent = peer ? peer.name : "Выберите устройство";
+    if (!selectedPeerFiles.length) {
+      peerFileSummary.textContent = "Выбрать файлы";
+    } else if (selectedPeerFiles.length === 1) {
+      peerFileSummary.textContent = selectedPeerFiles[0].name;
+    } else {
+      peerFileSummary.textContent = `${selectedPeerFiles.length} ${fileWord(selectedPeerFiles.length)} · ${formatBytes(selectedPeerFiles.reduce((sum, file) => sum + file.size, 0))}`;
+    }
+    sendPeerFilesBtn.disabled = !peer || !selectedPeerFiles.length;
   }
 
   function transferId() {
@@ -773,8 +892,8 @@
   }
 
   function setConnection(state) {
-    connection.className = `status ${state}`;
-    connection.textContent = state === "connected" ? "Подключено" : state === "reconnecting" ? "Переподключение" : "Нет соединения";
+    connection.className = `connection ${state}`;
+    connection.innerHTML = `<span></span>${state === "connected" ? "Подключено" : state === "reconnecting" ? "Переподключение" : "Нет соединения"}`;
   }
 
   function connectWebSocket() {
@@ -823,7 +942,7 @@
       if (data.event === "history_changed") {
         await loadHistory();
       }
-      if (data.event === "files_changed" && !filesView.classList.contains("hidden")) {
+      if (data.event === "files_changed") {
         await loadFiles();
       }
     };
@@ -864,14 +983,17 @@
   });
 
   historyList.addEventListener("click", async (event) => {
-    const button = event.target.closest("button");
-    if (!button) return;
+    const target = event.target.closest("[data-open], button[data-copy], button[data-delete]");
+    if (!target) return;
     const history = await request("/api/history");
-    const id = Number(button.dataset.open || button.dataset.copy || button.dataset.delete);
+    const id = Number(target.dataset.open || target.dataset.copy || target.dataset.delete);
     const entry = history.items.find((item) => item.id === id);
-    if (button.dataset.open && entry) setEntry(entry, false);
-    if (button.dataset.copy && entry) copyText(entry.text);
-    if (button.dataset.delete && entry && confirm("Удалить эту запись?")) {
+    if (target.dataset.open && entry) {
+      setEntry(entry, false);
+      await loadHistory();
+    }
+    if (target.dataset.copy && entry) copyText(entry.text);
+    if (target.dataset.delete && entry && confirm("Удалить эту запись?")) {
       await request(`/api/clipboard/${entry.id}`, { method: "DELETE" });
       await loadHistory();
     }
@@ -907,20 +1029,26 @@
   }));
   dropZone.addEventListener("drop", (event) => uploadFiles(event.dataTransfer.files));
   fileList.addEventListener("click", async (event) => {
-    const button = event.target.closest("button[data-delete-file]");
-    if (!button || !confirm("Удалить этот файл?")) return;
-    try {
-      await request(`/api/files/${button.dataset.deleteFile}`, { method: "DELETE" });
-      await loadFiles();
-      toast("Файл удалён");
-    } catch (error) {
-      toast(error.message);
-    }
+    const row = event.target.closest("[data-file-id]");
+    if (!row) return;
+    selectedFileId = Number(row.dataset.fileId);
+    fileList.querySelectorAll(".file-item").forEach((item) => item.classList.toggle("selected", Number(item.dataset.fileId) === selectedFileId));
+    renderFileInspector();
   });
+  fileList.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter" && event.key !== " ") return;
+    const row = event.target.closest("[data-file-id]");
+    if (!row) return;
+    event.preventDefault();
+    row.click();
+  });
+  selectedFileDelete.addEventListener("click", () => deleteSelectedFile().catch((error) => toast(error.message)));
+  selectedFileSend.addEventListener("click", () => prepareStoredFileForNearby().catch((error) => toast(error.message)));
 
   deviceNameInput.addEventListener("change", () => {
     const value = deviceNameInput.value.trim() || detectedDevice.name;
     deviceNameInput.value = value;
+    currentDeviceName.textContent = value;
     localStorage.setItem("deviceName", value);
     registerPeer();
   });
@@ -928,17 +1056,27 @@
     const button = event.target.closest("button[data-peer-id]");
     if (!button) return;
     selectedPeerId = button.dataset.peerId;
-    peerFileInput.click();
+    renderPeers();
   });
+  choosePeerFilesBtn.addEventListener("click", () => peerFileInput.click());
   peerFileInput.addEventListener("change", () => {
-    if (selectedPeerId) {
-      startPeerTransfer(selectedPeerId, peerFileInput.files).catch((error) => {
+    selectedPeerFiles = Array.from(peerFileInput.files || []);
+    peerFileInput.value = "";
+    updatePeerComposer();
+  });
+  sendPeerFilesBtn.addEventListener("click", () => {
+    if (selectedPeerId && selectedPeerFiles.length) {
+      const peerId = selectedPeerId;
+      const files = selectedPeerFiles.slice();
+      startPeerTransfer(peerId, files).then(() => {
+        selectedPeerFiles = [];
+        updatePeerComposer();
+      }).catch((error) => {
         const context = peerContexts.get(selectedPeerId);
         if (context) setTransferState(context, "Не удалось подключиться", true);
         toast(error && error.message ? error.message : "Не удалось начать передачу");
       });
     }
-    peerFileInput.value = "";
   });
   acceptTransferBtn.addEventListener("click", () => {
     if (!incomingContext) return;
@@ -961,18 +1099,10 @@
   clearTransfersBtn.addEventListener("click", () => {
     transferList.querySelectorAll('.transfer-item[data-state="complete"]').forEach((item) => item.remove());
     if (!transferList.querySelector(".transfer-item")) {
-      transferList.innerHTML = '<p class="muted empty-transfers">Активных передач нет.</p>';
+      transferList.innerHTML = '<p class="muted empty-state empty-transfers">Активных передач нет.</p>';
     }
   });
 
-  themeToggle.addEventListener("click", () => {
-    const current = document.documentElement.dataset.theme || "auto";
-    const next = current === "dark" ? "light" : "dark";
-    document.documentElement.dataset.theme = next;
-    localStorage.setItem("theme", next);
-  });
-  const storedTheme = localStorage.getItem("theme");
-  if (storedTheme) document.documentElement.dataset.theme = storedTheme;
   const storedSection = localStorage.getItem("section");
   switchSection(["files", "nearby"].includes(storedSection) ? storedSection : "clipboard");
 
@@ -981,6 +1111,12 @@
     receivedUrls.forEach((url) => URL.revokeObjectURL(url));
   });
 
-  loadInitial().catch((error) => toast(error.message));
+  Promise.all([
+    loadInitial(),
+    request("/api/config").then((config) => {
+      maxStorageBytes = config.max_file_storage_bytes;
+      return loadFiles();
+    })
+  ]).catch((error) => toast(error.message));
   connectWebSocket();
 })();

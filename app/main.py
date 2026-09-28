@@ -44,7 +44,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Local Clipboard stopped")
 
 
-app = FastAPI(title="Local Clipboard", version="3.0.0", lifespan=lifespan)
+app = FastAPI(title="Local Clipboard", version="3.1.0", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
