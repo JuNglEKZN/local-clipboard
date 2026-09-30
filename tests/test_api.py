@@ -148,3 +148,16 @@ def test_nearby_devices_discover_and_relay_signals():
             first.send_json({"event": "peer_signal", "payload": {"target": second_id, "signal": signal}})
             relayed = second.receive_json()
             assert relayed == {"event": "peer_signal", "payload": {"from": first_id, "signal": signal}}
+
+            transfer = {
+                "type": "offer",
+                "transferId": "transfer-1",
+                "files": [{"name": "photo.jpg", "size": 12, "type": "image/jpeg"}],
+                "totalBytes": 12,
+            }
+            first.send_json({"event": "peer_transfer", "payload": {"target": second_id, "transfer": transfer}})
+            relayed_transfer = second.receive_json()
+            assert relayed_transfer == {
+                "event": "peer_transfer",
+                "payload": {"from": first_id, "transfer": transfer},
+            }

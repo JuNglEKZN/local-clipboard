@@ -295,7 +295,7 @@ progress::-webkit-progress-value { background: var(--accent); border-radius: 8px
 .peer-card .peer-name { width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; text-align: center; font-weight: 600; }
 .send-composer {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(220px, 1.2fr) auto;
+  grid-template-columns: minmax(0, .8fr) minmax(0, 1.2fr) auto;
   align-items: end;
   gap: 12px;
   padding: 16px;
@@ -308,7 +308,7 @@ progress::-webkit-progress-value { background: var(--accent); border-radius: 8px
 #peerDestination { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .file-picker { min-width: 0; display: flex; align-items: center; justify-content: flex-start; gap: 10px; }
 .file-picker span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-#sendPeerFilesBtn { display: flex; align-items: center; gap: 8px; }
+#sendPeerFilesBtn { min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; white-space: nowrap; }
 .transfer-list { display: grid; }
 .transfer-item { display: grid; grid-template-columns: minmax(0, 1fr) minmax(120px, 220px); align-items: center; gap: 18px; padding: 15px 4px; border-bottom: 1px solid var(--line); }
 .transfer-header { min-width: 0; display: grid; gap: 3px; }
@@ -402,6 +402,8 @@ progress::-webkit-progress-value { background: var(--accent); border-radius: 8px
   .app-view { grid-template-columns: minmax(0, 1fr) 285px; }
   .brand { font-size: 17px; }
   .file-table-head, .file-item { grid-template-columns: minmax(160px, 1fr) 90px 150px; }
+  .send-composer { grid-template-columns: minmax(0, 1fr) auto; }
+  .composer-field { grid-column: 1 / -1; }
 }
 
 @media (max-width: 840px) {

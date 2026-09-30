@@ -44,7 +44,7 @@ async def lifespan(_app: FastAPI):
     logger.info("Local Clipboard stopped")
 
 
-app = FastAPI(title="Local Clipboard", version="3.1.0", lifespan=lifespan)
+app = FastAPI(title="Local Clipboard", version="3.1.1", lifespan=lifespan)
 templates = Jinja2Templates(directory="app/templates")
 app.mount("/static", StaticFiles(directory="app/static"), name="static")
 
@@ -293,6 +293,8 @@ async def websocket_endpoint(websocket: WebSocket):
                 )
             elif event == "peer_signal" and isinstance(payload.get("signal"), dict):
                 await manager.relay(websocket, str(payload.get("target", "")), payload["signal"])
+            elif event == "peer_transfer" and isinstance(payload.get("transfer"), dict):
+                await manager.relay_transfer(websocket, str(payload.get("target", "")), payload["transfer"])
     except WebSocketDisconnect:
         pass
     finally:

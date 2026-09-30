@@ -64,6 +64,18 @@ class ConnectionManager:
             self._remove(target.websocket)
             await self.broadcast_peer_lists()
 
+    async def relay_transfer(self, websocket: WebSocket, target_id: str, transfer: dict[str, Any]) -> None:
+        sender_id = self.websocket_peers.get(websocket)
+        sender = self.peers.get(sender_id or "")
+        target = self.peers.get(target_id)
+        if sender is None or target is None or not sender.registered or not target.registered:
+            return
+        try:
+            await self.send(target.websocket, "peer_transfer", {"from": sender.id, "transfer": transfer})
+        except (RuntimeError, WebSocketDisconnect):
+            self._remove(target.websocket)
+            await self.broadcast_peer_lists()
+
     async def broadcast_peer_lists(self) -> None:
         registered = [peer for peer in self.peers.values() if peer.registered]
         dead: list[WebSocket] = []

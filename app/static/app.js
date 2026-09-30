@@ -80,6 +80,7 @@
   const CHUNK_SIZE = 16 * 1024;
   const MAX_BUFFERED_AMOUNT = 1024 * 1024;
   const MAX_DIRECT_BYTES = 256 * 1024 * 1024;
+  const MAX_SOCKET_BUFFER = 1024 * 1024;
   const WebRTCConnection = window.RTCPeerConnection;
 
   function icon(name) {
@@ -511,14 +512,6 @@
 
   function renderPeers() {
     peerList.innerHTML = "";
-    if (!WebRTCConnection) {
-      nearbyStatus.textContent = "Браузер не поддерживает прямую передачу";
-      const unsupported = document.createElement("p");
-      unsupported.className = "notice error";
-      unsupported.textContent = "Обновите Safari, Chrome, Edge или Firefox. Файловое хранилище продолжает работать.";
-      peerList.appendChild(unsupported);
-      return;
-    }
     nearbyStatus.textContent = peers.length ? `Найдено устройств: ${peers.length}` : "Других устройств пока нет";
     if (selectedPeerId && !peerById(selectedPeerId)) selectedPeerId = null;
     if (!peers.length) {
@@ -608,12 +601,43 @@
     sendSocket("peer_signal", { target: peerId, signal });
   }
 
+  function signalPeerTransfer(peerId, transfer) {
+    return sendSocket("peer_transfer", { target: peerId, transfer });
+  }
+
+  function closePeerContext(context) {
+    if (!context) return;
+    clearTimeout(context.connectTimer);
+    if (context.pc) context.pc.close();
+  }
+
+  function createRelayContext(peerId, direction, id) {
+    const context = {
+      id: id || transferId(),
+      peerId,
+      direction,
+      transport: "relay",
+      pc: null,
+      channel: null,
+      files: [],
+      totalBytes: 0,
+      doneBytes: 0,
+      currentFile: null,
+      node: null,
+      completed: false,
+      connectTimer: null
+    };
+    peerContexts.set(peerId, context);
+    return context;
+  }
+
   function createPeerContext(peerId, direction) {
     const pc = new WebRTCConnection({ iceServers: [] });
     const context = {
       id: transferId(),
       peerId,
       direction,
+      transport: "direct",
       pc,
       channel: null,
       files: [],
@@ -667,6 +691,14 @@
     }
   }
 
+  function sendTransferMessage(context, payload) {
+    if (context.transport === "relay") {
+      return signalPeerTransfer(context.peerId, Object.assign({ transferId: context.id }, payload));
+    }
+    sendChannelJson(context, payload);
+    return true;
+  }
+
   function addReceivedFile(context, metadata, chunks) {
     const blob = new Blob(chunks, { type: metadata.type || "application/octet-stream" });
     const url = URL.createObjectURL(blob);
@@ -681,15 +713,15 @@
 
   function showIncomingOffer(context, message) {
     if (incomingContext && incomingContext !== context) {
-      sendChannelJson(context, { type: "response", accepted: false });
+      sendTransferMessage(context, { type: "response", accepted: false });
       return;
     }
     context.files = Array.isArray(message.files) ? message.files : [];
     context.totalBytes = Number(message.totalBytes) || 0;
     if (context.totalBytes > MAX_DIRECT_BYTES) {
-      sendChannelJson(context, { type: "response", accepted: false });
+      sendTransferMessage(context, { type: "response", accepted: false });
       context.completed = true;
-      context.pc.close();
+      closePeerContext(context);
       toast("Входящий пакет превышает лимит 256 МБ");
       return;
     }
@@ -792,12 +824,99 @@
     setTimeout(() => context.pc.close(), 1000);
   }
 
+  function arrayBufferToBase64(buffer) {
+    const bytes = new Uint8Array(buffer);
+    let binary = "";
+    for (let index = 0; index < bytes.length; index += 1) binary += String.fromCharCode(bytes[index]);
+    return btoa(binary);
+  }
+
+  function base64ToArrayBuffer(value) {
+    const binary = atob(value);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    return bytes.buffer;
+  }
+
+  async function waitForSocketBuffer() {
+    while (ws && ws.readyState === WebSocket.OPEN && ws.bufferedAmount > MAX_SOCKET_BUFFER) {
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    if (!ws || ws.readyState !== WebSocket.OPEN) throw new Error("Соединение с сервером потеряно");
+  }
+
+  async function sendRelayFiles(context) {
+    for (let index = 0; index < context.files.length; index += 1) {
+      const file = context.files[index];
+      sendTransferMessage(context, { type: "file-start", index });
+      for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+        await waitForSocketBuffer();
+        const chunk = await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer();
+        if (!sendTransferMessage(context, { type: "chunk", data: arrayBufferToBase64(chunk) })) {
+          throw new Error("Соединение с сервером потеряно");
+        }
+        context.doneBytes += chunk.byteLength;
+        updateTransferProgress(context);
+      }
+      sendTransferMessage(context, { type: "file-end", index });
+    }
+    sendTransferMessage(context, { type: "complete" });
+    context.completed = true;
+    setTransferState(context, "Отправлено", true);
+  }
+
+  async function handlePeerTransfer(payload) {
+    const peerId = payload.from;
+    const transfer = payload.transfer || {};
+    const id = String(transfer.transferId || "");
+    if (!id) return;
+    let context = peerContexts.get(peerId);
+
+    if (transfer.type === "offer") {
+      if (context && !context.completed) {
+        signalPeerTransfer(peerId, { type: "response", transferId: id, accepted: false });
+        return;
+      }
+      closePeerContext(context);
+      context = createRelayContext(peerId, "receive", id);
+      showIncomingOffer(context, transfer);
+      return;
+    }
+    if (!context || context.id !== id || context.completed) return;
+
+    if (transfer.type === "response") {
+      if (transfer.accepted) {
+        setTransferState(context, "Отправка...");
+        await sendRelayFiles(context).catch((error) => {
+          setTransferState(context, error.message || "Ошибка передачи", true);
+          context.completed = true;
+        });
+      } else {
+        setTransferState(context, "Получатель отклонил", true);
+        context.completed = true;
+      }
+    } else if (transfer.type === "file-start") {
+      context.currentFile = { metadata: context.files[transfer.index], chunks: [] };
+    } else if (transfer.type === "chunk" && context.currentFile && typeof transfer.data === "string") {
+      const chunk = base64ToArrayBuffer(transfer.data);
+      context.currentFile.chunks.push(chunk);
+      context.doneBytes += chunk.byteLength;
+      updateTransferProgress(context);
+    } else if (transfer.type === "file-end" && context.currentFile) {
+      addReceivedFile(context, context.currentFile.metadata, context.currentFile.chunks);
+      context.currentFile = null;
+    } else if (transfer.type === "complete") {
+      context.completed = true;
+      setTransferState(context, "Получено", true);
+    }
+  }
+
   async function startPeerTransfer(peerId, fileCollection) {
     const files = Array.from(fileCollection || []);
     if (!files.length) return;
     const totalBytes = files.reduce((total, file) => total + file.size, 0);
     if (totalBytes > MAX_DIRECT_BYTES) {
-      toast("Для прямой передачи выберите не более 256 МБ за один раз");
+      toast("Для передачи выберите не более 256 МБ за один раз");
       return;
     }
     const existing = peerContexts.get(peerId);
@@ -805,17 +924,22 @@
       toast("Передача с этим устройством уже выполняется");
       return;
     }
-    if (existing) existing.pc.close();
-    const context = createPeerContext(peerId, "send");
+    closePeerContext(existing);
+    const context = createRelayContext(peerId, "send");
     context.files = files;
     context.totalBytes = totalBytes;
     const peer = peerById(peerId);
     createTransferNode(context, `Для ${peer ? peer.name : "устройства"}: ${files.map((file) => file.name).join(", ")}`, "Подключение...");
-    const channel = context.pc.createDataChannel("local-clipboard-files", { ordered: true });
-    wireDataChannel(context, channel);
-    const offer = await context.pc.createOffer();
-    await context.pc.setLocalDescription(offer);
-    signalPeer(peerId, { description: context.pc.localDescription });
+    if (!sendTransferMessage(context, {
+      type: "offer",
+      files: context.files.map((file) => ({ name: file.name, size: file.size, type: file.type })),
+      totalBytes: context.totalBytes
+    })) {
+      context.completed = true;
+      setTransferState(context, "Нет соединения с сервером", true);
+      throw new Error("Нет соединения с сервером");
+    }
+    setTransferState(context, "Ожидание подтверждения");
   }
 
   async function handlePeerSignal(payload) {
@@ -823,7 +947,7 @@
     const signal = payload.signal || {};
     let context = peerContexts.get(peerId);
     if (signal.description && signal.description.type === "offer") {
-      if (context) context.pc.close();
+      closePeerContext(context);
       context = createPeerContext(peerId, "receive");
       context.pc.ondatachannel = (event) => wireDataChannel(context, event.channel);
       await context.pc.setRemoteDescription(signal.description);
@@ -918,7 +1042,7 @@
           if (!peerById(peerId) && !context.completed) {
             setTransferState(context, "Устройство отключилось", true);
             context.completed = true;
-            context.pc.close();
+            closePeerContext(context);
             if (incomingContext === context) {
               incomingContext = null;
               incomingTransfer.classList.add("hidden");
@@ -929,6 +1053,9 @@
       }
       if (data.event === "peer_signal") {
         await handlePeerSignal(data.payload).catch(() => toast("Не удалось установить прямое соединение"));
+      }
+      if (data.event === "peer_transfer") {
+        await handlePeerTransfer(data.payload).catch(() => toast("Ошибка передачи файла"));
       }
       if (data.event === "clipboard_updated") {
         await loadHistory();
@@ -1082,16 +1209,16 @@
     if (!incomingContext) return;
     const peer = peerById(incomingContext.peerId);
     createTransferNode(incomingContext, `От ${peer ? peer.name : "устройства"}: ${incomingContext.files.map((file) => file.name).join(", ")}`, "Получение...");
-    sendChannelJson(incomingContext, { type: "response", accepted: true });
+    sendTransferMessage(incomingContext, { type: "response", accepted: true });
     incomingTransfer.classList.add("hidden");
     incomingContext = null;
   });
   rejectTransferBtn.addEventListener("click", () => {
     if (incomingContext) {
       const rejected = incomingContext;
-      sendChannelJson(rejected, { type: "response", accepted: false });
+      sendTransferMessage(rejected, { type: "response", accepted: false });
       rejected.completed = true;
-      setTimeout(() => rejected.pc.close(), 300);
+      setTimeout(() => closePeerContext(rejected), 300);
     }
     incomingContext = null;
     incomingTransfer.classList.add("hidden");
@@ -1107,7 +1234,7 @@
   switchSection(["files", "nearby"].includes(storedSection) ? storedSection : "clipboard");
 
   window.addEventListener("unload", () => {
-    peerContexts.forEach((context) => context.pc.close());
+    peerContexts.forEach(closePeerContext);
     receivedUrls.forEach((url) => URL.revokeObjectURL(url));
   });
 
